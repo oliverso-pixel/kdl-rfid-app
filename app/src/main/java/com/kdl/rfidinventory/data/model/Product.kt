@@ -4,5 +4,6 @@ data class Product(
     val id: String,
     val name: String,
     val maxBasketCapacity: Int,
-    val description: String? = null
+    val description: String? = null,
+    val imageUrl: String? = null
 )

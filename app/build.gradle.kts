@@ -45,9 +45,9 @@ android {
 }
 
 dependencies {
-
-implementation(libs.androidx.compose.foundation)
-    //    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.compose.foundation)
+    implementation(files("libs/USDKLibrary-v1.0.0909.aar"))
+//    implementation(libs.androidx.core.ktx)
 //    implementation(libs.androidx.lifecycle.runtime.ktx)
 //    implementation(libs.androidx.activity.compose)
 //    implementation(platform(libs.androidx.compose.bom))
@@ -115,6 +115,9 @@ implementation(libs.androidx.compose.foundation)
 
     // Timber (日誌)
     implementation("com.jakewharton.timber:timber:5.0.1")
+
+    // Coil for Image Loading
+    implementation("io.coil-kt:coil-compose:2.5.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

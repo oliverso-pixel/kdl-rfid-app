@@ -12,40 +12,64 @@ import com.kdl.rfidinventory.util.ScanMode
 fun ScanModeSelector(
     currentMode: ScanMode,
     onModeChange: (ScanMode) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
-    Card(
+    Column(
         modifier = modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "掃描模式",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                ScanModeButton(
-                    text = "單個掃描",
-                    isSelected = currentMode == ScanMode.SINGLE,
-                    onClick = { onModeChange(ScanMode.SINGLE) },
-                    modifier = Modifier.weight(1f)
-                )
-                ScanModeButton(
-                    text = "連續掃描",
-                    isSelected = currentMode == ScanMode.CONTINUOUS,
-                    onClick = { onModeChange(ScanMode.CONTINUOUS) },
-                    modifier = Modifier.weight(1f)
-                )
+        Text(
+            text = "掃描模式",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
             }
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 單次掃描按鈕
+            FilterChip(
+                selected = currentMode == ScanMode.SINGLE,
+                onClick = {
+                    if (enabled) {
+                        onModeChange(ScanMode.SINGLE)
+                    }
+                },
+                label = { Text("單次掃描") },
+                modifier = Modifier.weight(1f),
+                enabled = enabled
+            )
+
+            // 連續掃描按鈕
+            FilterChip(
+                selected = currentMode == ScanMode.CONTINUOUS,
+                onClick = {
+                    if (enabled) {
+                        onModeChange(ScanMode.CONTINUOUS)
+                    }
+                },
+                label = { Text("連續掃描") },
+                modifier = Modifier.weight(1f),
+                enabled = enabled
+            )
+        }
+
+        // 模式說明
+        if (enabled) {
+            Text(
+                text = when (currentMode) {
+                    ScanMode.SINGLE -> "掃描一個籃子後自動停止"
+                    ScanMode.CONTINUOUS -> "持續掃描多個籃子，需手動停止"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
