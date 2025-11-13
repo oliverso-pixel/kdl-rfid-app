@@ -9,7 +9,10 @@ import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 
 @Database(
-    entities = [BasketEntity::class, PendingOperationEntity::class],
+    entities = [
+        BasketEntity::class,
+        PendingOperationEntity::class
+    ],
     version = 1,
     exportSchema = false
 )

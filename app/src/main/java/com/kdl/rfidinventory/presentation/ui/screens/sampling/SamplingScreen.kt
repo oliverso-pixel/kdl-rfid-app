@@ -1,6 +1,7 @@
 package com.kdl.rfidinventory.presentation.ui.screens.sampling
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -293,9 +294,9 @@ private fun SwipeToDeleteBasketItem(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val dismissState = rememberDismissState(
+    val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
-            if (dismissValue == DismissValue.DismissedToStart) {
+            if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
                 onDelete()
                 true
             } else {
@@ -304,14 +305,14 @@ private fun SwipeToDeleteBasketItem(
         }
     )
 
-    SwipeToDismiss(
+    SwipeToDismissBox(
         state = dismissState,
-        directions = setOf(DismissDirection.EndToStart),
-        background = {
+        backgroundContent = {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp),
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
                 Icon(
@@ -322,7 +323,7 @@ private fun SwipeToDeleteBasketItem(
                 )
             }
         },
-        dismissContent = {
+        content = {
             BasketListItem(
                 basket = basket,
                 onClick = {},
@@ -387,8 +388,7 @@ private fun SampleQuantityDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    spacing = 8.dp
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
                     TextButton(onClick = onDismiss) {
                         Text("取消")

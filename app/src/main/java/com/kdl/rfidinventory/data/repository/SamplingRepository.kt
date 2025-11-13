@@ -1,11 +1,13 @@
 package com.kdl.rfidinventory.data.repository
 
-import com.kdl.rfidinventory.data.local.AppDatabase
-import com.kdl.rfidinventory.data.local.entity.PendingOperation
-import com.kdl.rfidinventory.data.model.Basket
-import com.kdl.rfidinventory.data.model.BasketStatus
+import android.os.Build
+import androidx.annotation.RequiresApi
+import com.kdl.rfidinventory.data.local.dao.BasketDao
+import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
+import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
+import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.ApiService
-import com.kdl.rfidinventory.data.remote.request.SamplingRequest
+import com.kdl.rfidinventory.data.remote.dto.request.SamplingRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
@@ -16,12 +18,14 @@ import javax.inject.Singleton
 @Singleton
 class SamplingRepository @Inject constructor(
     private val apiService: ApiService,
-    private val database: AppDatabase
+    private val basketDao: BasketDao,
+    private val pendingOperationDao: PendingOperationDao
 ) {
 
     suspend fun getBasketByUid(uid: String): Result<Basket> = withContext(Dispatchers.IO) {
         try {
-            val entity = database.basketDao().getByUid(uid)
+            // 使用正確的 DAO 方法
+            val entity = basketDao.getBasketByUid(uid)
                 ?: return@withContext Result.failure(Exception("籃子不存在"))
 
             Result.success(entity.toBasket())
@@ -30,6 +34,7 @@ class SamplingRepository @Inject constructor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     suspend fun markForSampling(
         uids: List<String>,
         sampleQuantity: Int,
@@ -47,45 +52,55 @@ class SamplingRepository @Inject constructor(
                     remarks = remarks,
                     timestamp = timestamp
                 )
-                apiService.markForSampling(request)
+                val response = apiService.markForSampling(request)
 
-                // 更新本地資料庫
-                uids.forEach { uid ->
-                    val entity = database.basketDao().getByUid(uid)
-                    entity?.let {
-                        database.basketDao().update(
-                            it.copy(status = BasketStatus.SAMPLING.name)
-                        )
+                if (response.success) {
+                    // 更新本地資料庫狀態
+                    uids.forEach { uid ->
+                        val entity = basketDao.getBasketByUid(uid)
+                        entity?.let {
+                            basketDao.updateBasket(
+                                it.copy(
+                                    status = BasketStatus.SAMPLING,
+                                    lastUpdated = System.currentTimeMillis()
+                                )
+                            )
+                        }
                     }
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception(response.message ?: "標記抽樣失敗"))
                 }
             } else {
                 // 離線模式：儲存到待同步佇列
                 uids.forEach { uid ->
-                    val pendingOp = PendingOperation(
-                        operationType = "SAMPLING",
-                        data = """
+                    val operation = PendingOperationEntity(
+                        operationType = OperationType.SAMPLING,
+                        uid = uid,
+                        payload = """
                             {
-                                "uid": "$uid",
                                 "sampleQuantity": $sampleQuantity,
                                 "remarks": "$remarks",
                                 "timestamp": "$timestamp"
                             }
                         """.trimIndent(),
-                        timestamp = timestamp
+                        timestamp = System.currentTimeMillis()
                     )
-                    database.pendingOperationDao().insert(pendingOp)
+                    pendingOperationDao.insertOperation(operation)
 
                     // 更新本地狀態
-                    val entity = database.basketDao().getByUid(uid)
+                    val entity = basketDao.getBasketByUid(uid)
                     entity?.let {
-                        database.basketDao().update(
-                            it.copy(status = BasketStatus.SAMPLING.name)
+                        basketDao.updateBasket(
+                            it.copy(
+                                status = BasketStatus.SAMPLING,
+                                lastUpdated = System.currentTimeMillis()
+                            )
                         )
                     }
                 }
+                Result.success(Unit)
             }
-
-            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

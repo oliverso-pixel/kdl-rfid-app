@@ -16,6 +16,5 @@ enum class BasketStatus {
     RECEIVED,
     IN_STOCK,
     SHIPPED,
-    SAPLING,
     SAMPLING
 }

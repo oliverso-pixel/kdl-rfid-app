@@ -2,7 +2,7 @@ package com.kdl.rfidinventory.util
 
 object Constants {
     // API
-    const val BASE_URL = "http://test/api"
+    const val BASE_URL = "http://test/api/"
     const val WEBSOCKET_URL = "ws://test/ws"
 
     // WebSocket
@@ -15,7 +15,9 @@ object Constants {
     // Database
     const val DATABASE_NAME = "rfid_inventory.db"
 
-    // SharedPreferences / DataStore
-    const val PREFS_NAME = "rfid_prefs"
-    const val ADMIN_PASSWORD_KEY = "admin_password"
+    // SharedPreferences keys
+    const val PREF_NAME = "rfid_inventory_prefs"
+    const val PREF_SERVER_URL = "server_url"
+    const val PREF_SCAN_TIMEOUT = "scan_timeout"
+    const val PREF_AUTO_SYNC = "auto_sync"
 }

@@ -4,8 +4,9 @@ import com.kdl.rfidinventory.data.local.dao.BasketDao
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 import com.kdl.rfidinventory.data.model.*
-import com.kdl.rfidinventory.data.remote.api.ProductionApi
+import com.kdl.rfidinventory.data.remote.ApiService
 import com.kdl.rfidinventory.data.remote.dto.request.ProductionStartRequest
+import com.kdl.rfidinventory.data.remote.dto.response.toProduct
 import kotlinx.coroutines.delay
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -14,39 +15,49 @@ import javax.inject.Singleton
 
 @Singleton
 class ProductionRepository @Inject constructor(
-    private val productionApi: ProductionApi,
+    private val apiService: ApiService,
     private val basketDao: BasketDao,
     private val pendingOperationDao: PendingOperationDao
 ) {
 
-    /**
-     * 獲取待生產訂單列表 (Mock 數據)
-     */
     suspend fun getProductionOrders(): Result<List<ProductionOrder>> {
         return try {
-            // Mock 數據
+            val response = apiService.getProductionOrders()
+            if (response.success && response.data != null) {
+                val orders = response.data.map {
+                    ProductionOrder(
+                        productId = it.productId,
+                        productName = it.productName,
+                        totalQuantity = it.totalQuantity
+                    )
+                }
+                Result.success(orders)
+            } else {
+                delay(500)
+                Result.success(mockProductionOrders())
+            }
+        } catch (e: Exception) {
             delay(500)
             Result.success(mockProductionOrders())
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
-    /**
-     * 獲取產品詳情
-     */
     suspend fun getProductById(productId: String): Result<Product> {
         return try {
+            val response = apiService.getProductById(productId)
+            if (response.success && response.data != null) {
+                val product = response.data.toProduct()
+                Result.success(product)
+            } else {
+                delay(300)
+                Result.success(mockProducts().find { it.id == productId }!!)
+            }
+        } catch (e: Exception) {
             delay(300)
             Result.success(mockProducts().find { it.id == productId }!!)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
-    /**
-     * 開始生產（綁定籃子）
-     */
     suspend fun startProduction(
         uid: String,
         productId: String,
@@ -65,12 +76,26 @@ class ProductionRepository @Inject constructor(
             )
 
             if (isOnline) {
-                // 線上模式：直接呼叫 API
-                delay(500)  // Mock API 延遲
-                // val response = productionApi.startProduction(request)
-                Result.success(Unit)
+                val response = apiService.startProduction(request)
+                if (response.success) {
+                    val entity = basketDao.getBasketByUid(uid)
+                    if (entity != null) {
+                        basketDao.updateBasket(
+                            entity.copy(
+                                productID = productId,
+                                batchId = batchId,
+                                quantity = quantity,
+                                status = BasketStatus.IN_PRODUCTION,
+                                productionDate = productionDate,
+                                lastUpdated = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                    Result.success(Unit)
+                } else {
+                    Result.failure(Exception(response.message ?: "生產失敗"))
+                }
             } else {
-                // 離線模式：加入待辦隊列
                 val operation = PendingOperationEntity(
                     operationType = OperationType.PRODUCTION_START,
                     uid = uid,
@@ -78,6 +103,21 @@ class ProductionRepository @Inject constructor(
                     timestamp = System.currentTimeMillis()
                 )
                 pendingOperationDao.insertOperation(operation)
+
+                val entity = basketDao.getBasketByUid(uid)
+                if (entity != null) {
+                    basketDao.updateBasket(
+                        entity.copy(
+                            productID = productId,
+                            batchId = batchId,
+                            quantity = quantity,
+                            status = BasketStatus.IN_PRODUCTION,
+                            productionDate = productionDate,
+                            lastUpdated = System.currentTimeMillis()
+                        )
+                    )
+                }
+
                 Result.success(Unit)
             }
         } catch (e: Exception) {
@@ -85,7 +125,6 @@ class ProductionRepository @Inject constructor(
         }
     }
 
-    // Mock 數據
     private fun mockProductionOrders() = listOf(
         ProductionOrder("P001", "產品 A", 250),
         ProductionOrder("P002", "產品 B", 180),

@@ -394,8 +394,7 @@ private fun ServerUrlDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    spacing = 8.dp
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
                     TextButton(onClick = onDismiss) {
                         Text("取消")
@@ -464,8 +463,7 @@ private fun ScanTimeoutDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    spacing = 8.dp
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
                     TextButton(onClick = onDismiss) {
                         Text("取消")

@@ -1,6 +1,7 @@
 package com.kdl.rfidinventory.presentation.ui.screens.clear
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.presentation.ui.components.BasketListItem
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ScanModeSelector
@@ -300,9 +302,9 @@ private fun SwipeToDeleteBasketItem(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val dismissState = rememberDismissState(
+    val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
-            if (dismissValue == DismissValue.DismissedToStart) {
+            if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
                 onDelete()
                 true
             } else {
@@ -311,14 +313,14 @@ private fun SwipeToDeleteBasketItem(
         }
     )
 
-    SwipeToDismiss(
+    SwipeToDismissBox(
         state = dismissState,
-        directions = setOf(DismissDirection.EndToStart),
-        background = {
+        backgroundContent = {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp),
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
                 Icon(
@@ -329,7 +331,7 @@ private fun SwipeToDeleteBasketItem(
                 )
             }
         },
-        dismissContent = {
+        content = {
             BasketListItem(
                 basket = basket,
                 onClick = {},

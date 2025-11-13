@@ -99,7 +99,6 @@ private fun getStatusColor(status: BasketStatus): Color {
         BasketStatus.IN_STOCK -> Color(0xFF4CAF50)
         BasketStatus.SHIPPED -> Color(0xFF9C27B0)
         BasketStatus.SAMPLING -> Color(0xFFFFEB3B)
-        BasketStatus.SAPLING -> TODO()
     }
 }
 
@@ -111,6 +110,5 @@ private fun getStatusIcon(status: BasketStatus): ImageVector {
         BasketStatus.IN_STOCK -> Icons.Default.Inventory
         BasketStatus.SHIPPED -> Icons.Default.LocalShipping
         BasketStatus.SAMPLING -> Icons.Default.Science
-        BasketStatus.SAPLING -> TODO()
     }
 }

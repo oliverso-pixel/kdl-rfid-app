@@ -1,6 +1,6 @@
 package com.kdl.rfidinventory.di
 
-import com.kdl.rfidinventory.data.remote.api.*
+import com.kdl.rfidinventory.data.remote.ApiService
 import com.kdl.rfidinventory.util.Constants
 import dagger.Module
 import dagger.Provides
@@ -42,28 +42,9 @@ object NetworkModule {
             .build()
     }
 
-    // Mock API Services (後端未完成前使用)
     @Provides
     @Singleton
-    fun provideProductionApi(retrofit: Retrofit): ProductionApi {
-        return retrofit.create(ProductionApi::class.java)
-    }
-
-    @Provides
-    @Singleton
-    fun provideWarehouseApi(retrofit: Retrofit): WarehouseApi {
-        return retrofit.create(WarehouseApi::class.java)
-    }
-
-    @Provides
-    @Singleton
-    fun provideShippingApi(retrofit: Retrofit): ShippingApi {
-        return retrofit.create(ShippingApi::class.java)
-    }
-
-    @Provides
-    @Singleton
-    fun provideAdminApi(retrofit: Retrofit): AdminApi {
-        return retrofit.create(AdminApi::class.java)
+    fun provideApiService(retrofit: Retrofit): ApiService {
+        return retrofit.create(ApiService::class.java)
     }
 }
