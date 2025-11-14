@@ -1,6 +1,8 @@
 package com.kdl.rfidinventory.data.rfid
 
 import android.content.Context
+import android.os.Binder
+import android.os.IBinder
 import com.kdl.rfidinventory.util.ScanMode
 import com.kdl.rfidinventory.util.SoundTool
 import com.ubx.usdk.USDKManager
@@ -12,11 +14,14 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.random.Random
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
+
+import com.ubx.usdk.rfid.RfidManager as UsdkRfidManager
 
 /**
  * RFID 管理器 - Mock 版本
@@ -164,225 +169,207 @@ import java.util.concurrent.ConcurrentHashMap
 class RFIDManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-
-    private var mRfidManager: RfidManager? = null
+    private var mRfidManager: UsdkRfidManager? = null
     private var isSdkInitialized = false
-    private var currentScanMode = ScanMode.CONTINUOUS
-    private var scanChannel: kotlinx.coroutines.channels.SendChannel<RFIDTag>? = null
-
-    // 用於在連續掃描模式下過濾重複標籤
-    private val seenTags = ConcurrentHashMap.newKeySet<String>()
+    private var currentCallback: RfidCallbackBridge? = null
 
     companion object {
-        // 從 kdl-rfid-demo 中獲取的硬體連接埠和波特率
         private const val COM_PORT = "/dev/ttyHSL0"
         private const val BAUD_RATE = 115200
     }
 
     init {
         Timber.d("RFIDManager initializing...")
+        initializeSDK()
+    }
+
+    private fun initializeSDK() {
         try {
+            // 初始化音效工具
+            SoundTool.getInstance(context)
+
+            // 初始化 USDK
             USDKManager.getInstance().init(context) { status ->
-                if (status == USDKManager.STATUS.SUCCESS) {
-                    mRfidManager = USDKManager.getInstance().rfidManager
-                    if (mRfidManager?.connectCom(COM_PORT, BAUD_RATE) == true) {
-                        isSdkInitialized = true
-                        mRfidManager?.registerCallback(rfidCallback)
-                        Timber.i("RFID SDK Initialized and COM Port ($COM_PORT) Connected.")
-                        // 可選：初始化時獲取一次版本和功率
-                        mRfidManager?.getFirmwareVersion(mRfidManager!!.readId)
-                        mRfidManager?.getOutputPower(mRfidManager!!.readId)
-                    } else {
-                        Timber.e("Failed to connect to RFID COM port ($COM_PORT).")
+                when (status) {
+                    USDKManager.STATUS.SUCCESS -> {
+                        mRfidManager = USDKManager.getInstance().rfidManager
+
+                        if (mRfidManager == null) {
+                            Timber.e("Failed to get RfidManager instance")
+                            return@init
+                        }
+
+                        // 連接串口
+                        if (mRfidManager?.connectCom(COM_PORT, BAUD_RATE) == true) {
+                            isSdkInitialized = true
+                            Timber.i("✅ RFID SDK initialized successfully")
+
+                            // 獲取固件版本
+                            mRfidManager?.getFirmwareVersion(mRfidManager?.readId ?: 0)
+                        } else {
+                            Timber.e("❌ Failed to connect COM port: $COM_PORT")
+                        }
                     }
-                } else {
-                    Timber.e("Failed to initialize USDKManager. Status: $status")
+                    else -> {
+                        Timber.e("❌ USDKManager initialization failed: $status")
+                    }
                 }
             }
         } catch (e: Exception) {
-            Timber.e(e, "Exception during RFIDManager initialization.")
-        }
-    }
-
-    /**
-     * SDK 回調
-     * 這裡處理所有來自硬體的非同步事件
-     */
-    private val rfidCallback = object : IRfidCallback.Stub() {
-        override fun onInventoryTag(
-            cmd: Byte,
-            pc: String?,
-            crc: String?,
-            epc: String,
-            ant: Byte,
-            rssi: String,
-            freq: String?,
-            phase: Int,
-            count: Int,
-            readId: String?
-        ) {
-            Timber.d("onInventoryTag: EPC: $epc, RSSI: $rssi")
-
-            // 在連續掃描模式下，過濾掉本次掃描已回報過的標籤
-            if (currentScanMode == ScanMode.CONTINUOUS && !seenTags.add(epc)) {
-                return // 已回報過，忽略
-            }
-
-            val tag = RFIDTag(
-                uid = epc,
-                rssi = rssi.toIntOrNull() ?: 0,
-                timestamp = System.currentTimeMillis()
-            )
-
-            // 播放提示音 (來自 demo)
-            SoundTool.getInstance(context).playBeep(1)
-
-            // 將標籤發送到 Flow
-            val sendResult = scanChannel?.trySend(tag)
-            if (sendResult?.isFailure == true) {
-                Timber.w(sendResult.exceptionOrNull(), "Failed to send tag to channel.")
-            }
-
-            // 如果是單次掃描模式，收到第一個標籤後立即停止
-            if (currentScanMode == ScanMode.SINGLE) {
-                stopScan() // 這將觸發 flow 的 awaitClose
-            }
-        }
-
-        override fun onInventoryTagEnd(antId: Int, tagCount: Int, readSpeed: Int, totalCount: Int, cmd: Byte) {
-            Timber.d("Inventory scan ended. TotalCount: $totalCount")
-            // 當掃描被 stopInventory() 停止時，此回調會被觸發
-            // 我們在這裡關閉 channel 來通知 Flow 收集器
-            scanChannel?.close()
-            scanChannel = null
-        }
-
-        override fun onOperationTag(pc: String?, crc: String?, epc: String?, data: String?, dataLen: Int, ant: Byte, cmd: Byte) {
-            // 用於處理 Read/Write 操作的回調
-            Timber.d("onOperationTag: EPC: $epc, Data: $data")
-            // TODO: 實現 Read/Write 的協程回調
-        }
-
-        override fun onOperationTagEnd(tagCount: Int) {
-            // Read/Write 操作結束
-        }
-
-        override fun refreshSetting(rfidDate: RfidDate?) {
-            // 獲取設定 (如功率) 後的回調
-            rfidDate?.let {
-                val power = it.btAryOutputPower?.get(0)?.toInt() ?: -1
-                Timber.i("RFID Settings Refreshed. Power: $power")
-            }
-        }
-
-        override fun onExeCMDStatus(cmd: Byte, status: Byte) {
-            // 執行命令的狀態回調
-            if (status != ErrorCode.SUCCESS) {
-                Timber.w("Command $cmd failed with status code: $status")
-            } else {
-                Timber.d("Command $cmd executed successfully.")
-            }
-            // TODO: 實現 Write/SetPower 的協程回調
+            Timber.e(e, "Exception during SDK initialization")
         }
     }
 
     /**
      * 開始掃描
-     * @param mode 掃描模式（單個/連續）
-     * @return 一個 Flow，它會發出掃描到的 RFIDTag
      */
     fun startScan(mode: ScanMode): Flow<RFIDTag> = callbackFlow {
         if (!isSdkInitialized || mRfidManager == null) {
-            Timber.e("startScan called but SDK not initialized.")
-            close(IllegalStateException("RFID SDK 未初始化或連接埠失敗"))
+            Timber.e("SDK not initialized")
+            close(IllegalStateException("RFID SDK 未初始化"))
             return@callbackFlow
         }
 
-        // 確保上一個 flow 已關閉
-        scanChannel?.close()
-        scanChannel = channel // 將此 flow 的 channel 賦值給 scanChannel
+        val seenTags = ConcurrentHashMap.newKeySet<String>()
+        val isContinuous = mode == ScanMode.CONTINUOUS
 
-        currentScanMode = mode
+        // 創建 Java 回調橋接
+        val dataListener = object : RfidDataListener {
+            override fun onTagScanned(tag: RFIDTag) {
+                Timber.d("📡 Tag scanned: ${tag.uid}")
+                trySend(tag).isSuccess
+            }
 
-        // 如果是連續掃描，清空上一輪的標籤記錄
-        if (mode == ScanMode.CONTINUOUS) {
-            seenTags.clear()
+            override fun onScanEnded() {
+                Timber.d("🛑 Scan ended")
+                close()
+            }
         }
 
-        // 開始盤點 (使用 demo 中的 `customizedSessionTargetInventory`)
+        currentCallback = RfidCallbackBridge(
+            dataListener,
+            context,
+            seenTags,
+            isContinuous
+        )
+
+        // 註冊回調
+        mRfidManager?.registerCallback(currentCallback)
+
+        // 開始掃描
         try {
-            val readId = mRfidManager!!.readId
-            mRfidManager?.customizedSessionTargetInventory(readId, 1, 0, 1) // 參數 1, 0, 1
-            Timber.i("RFID scan started, Mode: $mode")
+            val readId = mRfidManager?.readId ?: 0
+            val result = mRfidManager?.customizedSessionTargetInventory(
+                readId,
+                1.toByte(),  // Session
+                0.toByte(),  // Target
+                1.toByte()   // Scan time (單位: 秒)
+            )
+
+            Timber.i("🚀 Scan started - Mode: $mode, Result: $result")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to start scan.")
+            Timber.e(e, "Failed to start scan")
             close(e)
         }
 
-        // flow 關閉時 (例如被 stopScan() 或從外部取消)
+        // Flow 關閉時清理
         awaitClose {
-            Timber.d("Flow is closing. Stopping inventory.")
-            mRfidManager?.stopInventory()
-            scanChannel = null
+            Timber.d("Closing scan flow...")
+            stopInventory()
+            if (currentCallback != null) {
+                mRfidManager?.unregisterCallback(currentCallback)
+                currentCallback = null
+            }
         }
     }
 
     /**
      * 停止掃描
-     * 這會觸發 `onInventoryTagEnd` 回調，並關閉 `startScan` 中 `callbackFlow`
      */
     fun stopScan() {
-        if (!isSdkInitialized || mRfidManager == null) {
-            Timber.w("stopScan called, but SDK not initialized.")
-            return
+        Timber.d("stopScan called")
+        stopInventory()
+    }
+
+    private fun stopInventory() {
+        try {
+            mRfidManager?.stopInventory()
+            Timber.d("Inventory stopped")
+        } catch (e: Exception) {
+            Timber.e(e, "Error stopping inventory")
         }
-        Timber.d("stopScan called.")
-        mRfidManager?.stopInventory()
     }
 
     /**
-     * 寫入標籤 EPC (管理員功能)
-     * TODO: 需要使用 suspendCancellableCoroutine 配合 onExeCMDStatus 回調來實現
+     * 寫入標籤 EPC
      */
-    suspend fun writeUid(oldUid: String, newUid: String, accessPwd: String = "00000000"): Result<Unit> {
-        if (!isSdkInitialized || mRfidManager == null) {
-            return Result.failure(IllegalStateException("SDK not initialized"))
+    suspend fun writeUid(newUid: String, password: String = "00000000"): Result<Unit> {
+        return try {
+            if (!isSdkInitialized || mRfidManager == null) {
+                return Result.failure(IllegalStateException("SDK not initialized"))
+            }
+
+            val readId = mRfidManager?.readId ?: 0
+            val result = mRfidManager?.writeEpcString(readId, newUid, password)
+
+            if (result == 0) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("Write failed with code: $result"))
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error writing UID")
+            Result.failure(e)
         }
-        Timber.w("writeUid: Not implemented yet. (Demo uses writeTag or writeEpcString)")
-        // 實作邏輯:
-        // 1. mRfidManager.setAccessEpcMatch(...) 鎖定 oldUid
-        // 2. mRfidManager.writeTag(...) 或 writeEpcString(...) 寫入 newUid
-        // 3. 使用 suspendCancellableCoroutine 包裹，並在 onExeCMDStatus 回調中 resume
-        return Result.failure(Exception("Write function not implemented"))
     }
 
     /**
-     * 設定掃描功率 (管理員功能)
-     * TODO: 需要使用 suspendCancellableCoroutine 配合 onExeCMDStatus/refreshSetting 回調來實現
+     * 設定功率
      */
     suspend fun setPower(power: Int): Result<Unit> {
-        if (!isSdkInitialized || mRfidManager == null) {
-            return Result.failure(IllegalStateException("SDK not initialized"))
+        return try {
+            if (!isSdkInitialized || mRfidManager == null) {
+                return Result.failure(IllegalStateException("SDK not initialized"))
+            }
+
+            if (power < 0 || power > 33) {
+                return Result.failure(IllegalArgumentException("Power must be 0-33"))
+            }
+
+            val readId = mRfidManager?.readId ?: 0
+            mRfidManager?.setOutputPower(readId, power.toByte())
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Timber.e(e, "Error setting power")
+            Result.failure(e)
         }
-        Timber.w("setPower: Not implemented yet. (Demo uses setOutputPower)")
-        // 實作邏輯:
-        // 1. mRfidManager.setOutputPower(mRfidManager!!.readId, power.toByte())
-        // 2. 使用 suspendCancellableCoroutine 包裹，並在 onExeCMDStatus 回調中 resume
-        return Result.failure(Exception("Set power function not implemented"))
     }
 
     /**
-     * 在 App 退出時釋放 SDK 資源
+     * 釋放資源
      */
     fun release() {
-        Timber.i("Releasing RFIDManager resources.")
-        if (mRfidManager != null) {
-            mRfidManager?.stopInventory()
+        Timber.i("Releasing RFIDManager resources")
+
+        try {
+            stopInventory()
+
+            if (currentCallback != null) {
+                mRfidManager?.unregisterCallback(currentCallback)
+                currentCallback = null
+            }
+
             mRfidManager?.disConnect()
             mRfidManager?.release()
             mRfidManager = null
+
+            SoundTool.getInstance(context)?.release()
+
+            isSdkInitialized = false
+            Timber.i("✅ Resources released successfully")
+        } catch (e: Exception) {
+            Timber.e(e, "Error releasing resources")
         }
-        SoundTool.getInstance(context).release()
-        isSdkInitialized = false
     }
 }

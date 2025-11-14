@@ -47,8 +47,8 @@ android {
 dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(files("libs/USDKLibrary-v1.0.0909.aar"))
-    implementation(files("libs/usdk.jar"))
-//    implementation(libs.androidx.core.ktx)
+//    implementation(files("libs/usdk.jar"))
+
 //    implementation(libs.androidx.lifecycle.runtime.ktx)
 //    implementation(libs.androidx.activity.compose)
 //    implementation(platform(libs.androidx.compose.bom))
