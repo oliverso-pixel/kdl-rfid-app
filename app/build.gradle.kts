@@ -46,23 +46,10 @@ android {
 
 dependencies {
     implementation(libs.androidx.compose.foundation)
-    implementation(files("libs/USDKLibrary-v1.0.0909.aar"))
-//    implementation(files("libs/usdk.jar"))
 
-//    implementation(libs.androidx.lifecycle.runtime.ktx)
-//    implementation(libs.androidx.activity.compose)
-//    implementation(platform(libs.androidx.compose.bom))
-//    implementation(libs.androidx.ui)
-//    implementation(libs.androidx.ui.graphics)
-//    implementation(libs.androidx.ui.tooling.preview)
-//    implementation(libs.androidx.material3)
-//    testImplementation(libs.junit)
-//    androidTestImplementation(libs.androidx.junit)
-//    androidTestImplementation(libs.androidx.espresso.core)
-//    androidTestImplementation(platform(libs.androidx.compose.bom))
-//    androidTestImplementation(libs.androidx.ui.test.junit4)
-//    debugImplementation(libs.androidx.ui.tooling)
-//    debugImplementation(libs.androidx.ui.test.manifest)
+    // RFID SDK
+    implementation(files("libs/USDKLibrary-v1.0.0909.aar"))
+
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)

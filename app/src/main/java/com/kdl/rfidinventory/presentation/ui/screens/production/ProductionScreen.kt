@@ -28,6 +28,7 @@ import com.kdl.rfidinventory.data.model.Product
 import com.kdl.rfidinventory.data.model.ScannedBasket
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ScanModeSelector
+import com.kdl.rfidinventory.util.ScanMode
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,9 +75,28 @@ fun ProductionScreen(
                         }
                     },
                     actions = {
+                        // 清空籃子列表按鈕（只在有籃子時顯示）
+                        if (uiState.scannedBaskets.isNotEmpty()) {
+                            IconButton(
+                                onClick = { viewModel.clearBaskets() },
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "清空籃子列表",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
+
+                        // 完全重置按鈕（產品或籃子存在時顯示）
                         if (uiState.selectedProduct != null || uiState.scannedBaskets.isNotEmpty()) {
                             IconButton(onClick = { viewModel.resetAll() }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "重置")
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "完全重置",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
                             }
                         }
                     },
@@ -149,9 +169,12 @@ fun ProductionScreen(
                         ScanSettingsCard(
                             scanMode = uiState.scanMode,
                             isScanning = uiState.isScanning,
+                            scanType = uiState.scanType,
+                            totalScanCount = uiState.totalScanCount,
+                            basketCount = uiState.scannedBaskets.size,
                             onModeChange = { viewModel.setScanMode(it) },
-                            onStartScan = { viewModel.startScanning() },
-                            onStopScan = { viewModel.stopScanning() }
+                            onToggleScan = { viewModel.toggleScanFromButton() },
+                            onClearBaskets = { viewModel.clearBaskets() }
                         )
                     }
                 }
@@ -159,11 +182,41 @@ fun ProductionScreen(
                 // 步驟 4: 已掃描籃子列表
                 if (uiState.scannedBaskets.isNotEmpty()) {
                     item {
-                        Text(
-                            text = "已掃描籃子 (${uiState.scannedBaskets.size})",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "已掃描籃子 (${uiState.scannedBaskets.size})",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.QrCodeScanner,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Text(
+                                        text = "總計: ${uiState.totalScanCount} 次",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     items(
@@ -176,7 +229,8 @@ fun ProductionScreen(
                             onQuantityChange = { newQuantity ->
                                 viewModel.updateBasketQuantity(basket.uid, newQuantity)
                             },
-                            onRemove = { viewModel.removeBasket(basket.uid) }
+                            onRemove = { viewModel.removeBasket(basket.uid) },
+                            onResetCount = { viewModel.resetBasketScanCount(basket.uid) }
                         )
                     }
                 }
@@ -391,15 +445,21 @@ private fun BatchSelectionCard(
 private fun ScanSettingsCard(
     scanMode: com.kdl.rfidinventory.util.ScanMode,
     isScanning: Boolean,
+    scanType: ScanType = ScanType.NONE,
+    totalScanCount: Int,
+    basketCount: Int = 0,
     onModeChange: (com.kdl.rfidinventory.util.ScanMode) -> Unit,
-    onStartScan: () -> Unit,
-    onStopScan: () -> Unit
+    onToggleScan: () -> Unit = {},  // ⭐ 統一的切換掃描按鈕
+    onClearBaskets: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (isScanning) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface
+            containerColor = when {
+                isScanning && scanType == ScanType.BARCODE -> MaterialTheme.colorScheme.tertiaryContainer
+                isScanning && scanType == ScanType.RFID -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.surface
+            }
         )
     ) {
         Column(
@@ -414,30 +474,235 @@ private fun ScanSettingsCard(
                 enabled = !isScanning
             )
 
-            if (isScanning) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                    Text(
-                        text = "正在掃描中...",
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f)
+            // 統計信息
+            if (totalScanCount > 0 || basketCount > 0) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
                     )
-                    TextButton(onClick = onStopScan) {
-                        Text("停止")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "籃子數量",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Text(
+                                    text = "$basketCount 個",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+
+                            Divider(
+                                modifier = Modifier
+                                    .height(40.dp)
+                                    .width(1.dp),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.3f)
+                            )
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.QrCodeScanner,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "掃描次數",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Text(
+                                        text = "$totalScanCount 次",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+
+                        if (basketCount > 0) {
+                            IconButton(
+                                onClick = onClearBaskets,
+                                enabled = !isScanning
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "清空列表",
+                                    tint = if (isScanning) {
+                                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.38f)
+                                    } else {
+                                        MaterialTheme.colorScheme.error
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
-            } else {
-                Button(
-                    onClick = onStartScan,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("開始掃描")
+            }
+
+            // ⭐ 掃描狀態提示和控制按鈕
+            when {
+                isScanning && scanType == ScanType.BARCODE -> {
+                    // 條碼掃描中（無法手動停止）
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "等待條碼掃描...",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = "請使用掃碼槍掃描QR/條碼",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+                isScanning && scanType == ScanType.RFID -> {
+                    // RFID 掃描中
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "RFID 掃描中...",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = when (scanMode) {
+                                        ScanMode.SINGLE -> "近距離掃描（掃到後自動停止）"
+                                        ScanMode.CONTINUOUS -> "連續掃描中"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+
+                        // ⭐ 停止按鈕
+                        Button(
+                            onClick = onToggleScan,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("停止掃描")
+                        }
+                    }
+                }
+                else -> {
+                    // ⭐ 未掃描狀態：顯示操作提示和掃描按鈕
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // RFID 掃描按鈕（兩種模式都可用）
+                        Button(
+                            onClick = onToggleScan,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = when (scanMode) {
+                                    ScanMode.SINGLE -> Icons.Default.Nfc
+                                    ScanMode.CONTINUOUS -> Icons.Default.Radar
+                                },
+                                contentDescription = null
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                when (scanMode) {
+                                    ScanMode.SINGLE -> "RFID 掃描（近距離）"
+                                    ScanMode.CONTINUOUS -> "開始連續掃描"
+                                }
+                            )
+                        }
+
+                        // 模式說明卡片
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = when (scanMode) {
+                                            ScanMode.SINGLE -> "單次掃描模式"
+                                            ScanMode.CONTINUOUS -> "連續掃描模式"
+                                        },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                when (scanMode) {
+                                    ScanMode.SINGLE -> {
+                                        Text(
+                                            text = "• RFID：點擊按鈕進行近距離掃描\n• 條碼：使用實體掃碼槍觸發",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                    ScanMode.CONTINUOUS -> {
+                                        Text(
+                                            text = "• 點擊按鈕開始連續掃描\n• 再次點擊或使用實體按鍵停止\n• 也可使用實體按鍵控制",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -449,7 +714,8 @@ private fun ScannedBasketCard(
     basket: ScannedBasket,
     maxCapacity: Int,
     onQuantityChange: (Int) -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onResetCount: () -> Unit = {}
 ) {
     var quantityText by remember(basket.quantity) { mutableStateOf(basket.quantity.toString()) }
     var showError by remember { mutableStateOf(false) }
@@ -457,7 +723,11 @@ private fun ScannedBasketCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
+            containerColor = if (basket.scanCount > 1) {
+                MaterialTheme.colorScheme.tertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            }
         )
     ) {
         Column(
@@ -466,17 +736,60 @@ private fun ScannedBasketCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // 標題行：UID、掃描次數徽章和操作按鈕
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "籃子 UID",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "籃子 UID",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                        )
+                        // 掃描次數徽章
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (basket.scanCount > 1) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            modifier = Modifier.height(20.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.QrCodeScanner,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = if (basket.scanCount > 1) {
+                                        MaterialTheme.colorScheme.onError
+                                    } else {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    }
+                                )
+                                Text(
+                                    text = "${basket.scanCount}次",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (basket.scanCount > 1) {
+                                        MaterialTheme.colorScheme.onError
+                                    } else {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = basket.uid,
                         style = MaterialTheme.typography.titleSmall,
@@ -484,20 +797,81 @@ private fun ScannedBasketCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                IconButton(onClick = onRemove) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "移除",
-                        tint = MaterialTheme.colorScheme.error
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 重置次數按鈕（只在重複掃描時顯示）
+                    if (basket.scanCount > 1) {
+                        IconButton(
+                            onClick = onResetCount,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "重置次數",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    // 刪除按鈕
+                    IconButton(
+                        onClick = onRemove,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "移除",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            // 掃描次數提示（重複掃描時顯示）
+            if (basket.scanCount > 1) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "重複掃描 ${basket.scanCount} 次",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "請確認是否為同一個籃子",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
                 }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
+                // 數量輸入
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "數量",
@@ -524,22 +898,62 @@ private fun ScannedBasketCard(
                         } else null,
                         singleLine = true
                     )
+                }
 
-                    Column {
+                // 信號強度
+                Column {
+                    Text(
+                        text = "信號強度",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "${basket.rssi} dBm",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
+            // 時間信息
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "首次掃描",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        text = formatTimestamp(basket.firstScannedTime),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                if (basket.scanCount > 1) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "信號強度",
+                            text = "最後掃描",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
                         )
                         Text(
-                            text = "${basket.rssi} dBm",
-                            style = MaterialTheme.typography.bodyMedium
+                            text = formatTimestamp(basket.lastScannedTime),
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
             }
         }
     }
+}
+
+// 時間格式化輔助函數
+private fun formatTimestamp(timestamp: Long): String {
+    val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(timestamp))
 }
 
 @Composable
