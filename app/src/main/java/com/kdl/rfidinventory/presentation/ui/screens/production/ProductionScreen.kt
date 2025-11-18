@@ -3,11 +3,11 @@ package com.kdl.rfidinventory.presentation.ui.screens.production
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -16,9 +16,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -29,6 +38,7 @@ import com.kdl.rfidinventory.data.model.ScannedBasket
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ScanModeSelector
 import com.kdl.rfidinventory.util.ScanMode
+import timber.log.Timber
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -242,8 +252,16 @@ fun ProductionScreen(
     if (uiState.showProductDialog) {
         ProductSelectionDialog(
             products = uiState.products,
-            onDismiss = { viewModel.dismissDialog() },
-            onProductSelected = { viewModel.selectProduct(it) }
+            searchQuery = uiState.productSearchQuery,
+            onSearchQueryChange = { viewModel.updateProductSearchQuery(it) },
+            onDismiss = {
+                viewModel.clearProductSearchQuery()
+                viewModel.dismissDialog()
+            },
+            onProductSelected = {
+                viewModel.clearProductSearchQuery()
+                viewModel.selectProduct(it)
+            }
         )
     }
 
@@ -449,7 +467,7 @@ private fun ScanSettingsCard(
     totalScanCount: Int,
     basketCount: Int = 0,
     onModeChange: (com.kdl.rfidinventory.util.ScanMode) -> Unit,
-    onToggleScan: () -> Unit = {},  // ⭐ 統一的切換掃描按鈕
+    onToggleScan: () -> Unit = {},
     onClearBaskets: () -> Unit = {}
 ) {
     Card(
@@ -959,58 +977,467 @@ private fun formatTimestamp(timestamp: Long): String {
 @Composable
 private fun ProductSelectionDialog(
     products: List<Product>,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onProductSelected: (Product) -> Unit
 ) {
+    val focusRequester = remember { FocusRequester() }
+    var isDialogReady by remember { mutableStateOf(false) }
+
+    // ⭐ 確保對話框完全加載後才請求焦點
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(100) // 短暫延遲確保 UI 完全渲染
+        try {
+            focusRequester.requestFocus()
+            isDialogReady = true
+            Timber.d("✅ Product dialog ready, focus requested")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to request focus")
+        }
+    }
+
+    // ⭐ 監聽搜索查詢變化，用於調試
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isNotEmpty()) {
+            Timber.d("🔍 Search query updated: $searchQuery")
+        }
+    }
+
+    // 過濾產品列表
+    val filteredProducts = remember(products, searchQuery) {
+        if (searchQuery.isBlank()) {
+            products
+        } else {
+            val query = searchQuery.trim().lowercase()
+            products.filter { product ->
+                product.id.lowercase().contains(query) ||
+                        product.name.lowercase().contains(query) ||
+                        (product.barcodeId?.toString()?.contains(query) == true) ||
+                        (product.qrcodeId?.lowercase()?.contains(query) == true)
+            }
+        }
+    }
+
+    // ⭐ 監聽 Enter 鍵自動選擇
+    val onEnterPressed = {
+        if (filteredProducts.size == 1) {
+            Timber.d("⌨️ Enter pressed, selecting product: ${filteredProducts.first().name}")
+            onProductSelected(filteredProducts.first())
+        }
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("選擇產品") },
-        text = {
-            LazyColumn(
+        onDismissRequest = {
+            Timber.d("🚪 Dialog dismissed")
+            onSearchQueryChange("")
+            onDismiss()
+        },
+        title = {
+            Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(products) { product ->
-                    Card(
-                        onClick = { onProductSelected(product) },
-                        modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("選擇產品")
+
+                    // ⭐ 掃碼槍提示圖標（帶狀態指示）
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (isDialogReady) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        Text(
+                            text = if (isDialogReady) "可用掃碼槍" else "準備中...",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isDialogReady) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                }
+
+                // ⭐ 搜索框
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { newValue ->
+                        Timber.d("📝 Search query changed: '$newValue'")
+                        onSearchQueryChange(newValue)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .onKeyEvent { keyEvent ->
+                            when {
+                                keyEvent.key == Key.Enter && keyEvent.type == KeyEventType.KeyDown -> {
+                                    onEnterPressed()
+                                    true
+                                }
+                                else -> false
+                            }
+                        },
+                    placeholder = {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            AsyncImage(
-                                model = product.imageUrl,
-                                contentDescription = product.name,
-                                modifier = Modifier
-                                    .size(50.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
-                                contentScale = ContentScale.Crop
+                            Icon(
+                                imageVector = Icons.Default.QrCode,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
                             )
-                            Column {
-                                Text(
-                                    text = product.name,
-                                    style = MaterialTheme.typography.titleSmall
+                            Text("搜索或掃描條碼/QR碼")
+                        }
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = "搜索")
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = {
+                                Timber.d("🗑️ Clearing search query")
+                                onSearchQueryChange("")
+                            }) {
+                                Icon(Icons.Default.Clear, contentDescription = "清除")
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    enabled = isDialogReady, // ⭐ 只有準備好後才啟用
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Search
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            Timber.d("🔍 Search action triggered")
+                            onEnterPressed()
+                        }
+                    )
+                )
+
+                // ⭐ 結果數量提示和匹配狀態
+                if (searchQuery.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "找到 ${filteredProducts.size} 個結果",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (filteredProducts.size == 1) {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
                                 )
-                                Text(
-                                    text = "容量: ${product.maxBasketCapacity}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        text = "精確匹配",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         },
-        confirmButton = {},
+        text = {
+            if (filteredProducts.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SearchOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "找不到符合條件的產品",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (searchQuery.isNotEmpty()) {
+                            Text(
+                                text = "請檢查條碼是否正確或嘗試其他關鍵字",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filteredProducts) { product ->
+                        ProductItem(
+                            product = product,
+                            searchQuery = searchQuery,
+                            onClick = {
+                                Timber.d("🖱️ Product clicked: ${product.name}")
+                                onProductSelected(product)
+                            }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (filteredProducts.size == 1) {
+                Button(
+                    onClick = {
+                        Timber.d("✅ Confirm button clicked")
+                        onProductSelected(filteredProducts.first())
+                    },
+                    enabled = isDialogReady
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("選擇此產品")
+                }
+            }
+        },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = {
+                    Timber.d("❌ Cancel button clicked")
+                    onSearchQueryChange("")
+                    onDismiss()
+                }
+            ) {
                 Text("取消")
             }
         }
+    )
+}
+
+@Composable
+private fun ProductItem(
+    product: Product,
+    searchQuery: String,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 產品圖片
+            AsyncImage(
+                model = product.imageUrl,
+                contentDescription = product.name,
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop
+            )
+
+            // 產品信息
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // 產品名稱（高亮匹配文字）
+                HighlightedText(
+                    text = product.name,
+                    highlight = searchQuery,
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                // 產品 ID
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ID:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    HighlightedText(
+                        text = product.id,
+                        highlight = searchQuery,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                // Barcode（如果有）
+                product.barcodeId?.let { barcode ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCode,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "條碼:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HighlightedText(
+                            text = barcode.toString(),
+                            highlight = searchQuery,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
+                // QR Code（如果有）
+                product.qrcodeId?.let { qrcode ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCode2,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "QR:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HighlightedText(
+                            text = qrcode,
+                            highlight = searchQuery,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+
+                // 容量
+                Text(
+                    text = "最大容量: ${product.maxBasketCapacity}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun HighlightedText(
+    text: String,
+    highlight: String,
+    style: androidx.compose.ui.text.TextStyle,
+    modifier: Modifier = Modifier
+) {
+    if (highlight.isBlank()) {
+        Text(
+            text = text,
+            style = style,
+            modifier = modifier
+        )
+        return
+    }
+
+    val highlightColor = MaterialTheme.colorScheme.primary
+    val annotatedString = buildAnnotatedString {
+        var currentIndex = 0
+        val lowerText = text.lowercase()
+        val lowerHighlight = highlight.lowercase()
+
+        while (currentIndex < text.length) {
+            val startIndex = lowerText.indexOf(lowerHighlight, currentIndex)
+
+            if (startIndex == -1) {
+                // 沒有找到更多匹配，添加剩餘文字
+                append(text.substring(currentIndex))
+                break
+            }
+
+            // 添加匹配前的文字
+            if (startIndex > currentIndex) {
+                append(text.substring(currentIndex, startIndex))
+            }
+
+            // 添加高亮文字
+            val endIndex = startIndex + lowerHighlight.length
+            withStyle(
+                style = SpanStyle(
+                    color = highlightColor,
+                    fontWeight = FontWeight.Bold,
+                    background = highlightColor.copy(alpha = 0.2f)
+                )
+            ) {
+                append(text.substring(startIndex, endIndex))
+            }
+
+            currentIndex = endIndex
+        }
+    }
+
+    Text(
+        text = annotatedString,
+        style = style,
+        modifier = modifier
     )
 }
 

@@ -5,5 +5,7 @@ data class Product(
     val name: String,
     val maxBasketCapacity: Int,
     val description: String? = null,
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val barcodeId: Long? = null,
+    val qrcodeId: String? = null
 )

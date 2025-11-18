@@ -46,46 +46,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * 攔截按鍵事件
-     */
-//    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-//        event ?: return super.onKeyDown(keyCode, event)
-//
-//        if (keyEventHandler.isEnabled) {
-//            lifecycleScope.launch {
-//                val handled = keyEventHandler.handleKeyEvent(keyCode, event)
-//                if (!handled) {
-//                    // 如果按鍵事件未處理，交給父類處理
-//                    this@MainActivity.runOnUiThread {
-//                        super.onKeyDown(keyCode, event)
-//                    }
-//                }
-//            }
-//            return true
-//        }
-//
-//        return super.onKeyDown(keyCode, event)
-//    }
-
-//    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-//        event ?: return super.onKeyUp(keyCode, event)
-//
-//        if (keyEventHandler.isEnabled) {
-//            lifecycleScope.launch {
-//                val handled = keyEventHandler.handleKeyEvent(keyCode, event)
-//                if (!handled) {
-//                    this@MainActivity.runOnUiThread {
-//                        super.onKeyUp(keyCode, event)
-//                    }
-//                }
-//            }
-//            return true
-//        }
-//
-//        return super.onKeyUp(keyCode, event)
-//    }
-
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         Timber.d("🎯 Activity dispatchKeyEvent: keyCode=${event.keyCode}, action=${event.action}")
@@ -99,7 +59,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // 如果未處理，則使用默認處理
         return super.dispatchKeyEvent(event)
     }
 

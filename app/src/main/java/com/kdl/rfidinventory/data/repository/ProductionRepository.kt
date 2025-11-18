@@ -27,8 +27,11 @@ class ProductionRepository @Inject constructor(
                 val orders = response.data.map {
                     ProductionOrder(
                         productId = it.productId,
+                        barcodeID = it.barcodeID,
+                        qrcodeID = it.qrcodeID,
                         productName = it.productName,
-                        totalQuantity = it.totalQuantity
+                        totalQuantity = it.totalQuantity,
+                        imageUrl = it.imageUrl
                     )
                 }
                 Result.success(orders)
@@ -42,21 +45,21 @@ class ProductionRepository @Inject constructor(
         }
     }
 
-    suspend fun getProductById(productId: String): Result<Product> {
-        return try {
-            val response = apiService.getProductById(productId)
-            if (response.success && response.data != null) {
-                val product = response.data.toProduct()
-                Result.success(product)
-            } else {
-                delay(300)
-                Result.success(mockProducts().find { it.id == productId }!!)
-            }
-        } catch (e: Exception) {
-            delay(300)
-            Result.success(mockProducts().find { it.id == productId }!!)
-        }
-    }
+//    suspend fun getProductById(productId: String): Result<Product> {
+//        return try {
+//            val response = apiService.getProductById(productId)
+//            if (response.success && response.data != null) {
+//                val product = response.data.toProduct()
+//                Result.success(product)
+//            } else {
+//                delay(300)
+//                Result.success(mockProducts().find { it.id == productId }!!)
+//            }
+//        } catch (e: Exception) {
+//            delay(300)
+//            Result.success(mockProducts().find { it.id == productId }!!)
+//        }
+//    }
 
     suspend fun startProduction(
         uid: String,
@@ -126,20 +129,22 @@ class ProductionRepository @Inject constructor(
     }
 
     private fun mockProductionOrders() = listOf(
-        ProductionOrder("P001", "產品 A", 250),
-        ProductionOrder("P002", "產品 B", 180),
-        ProductionOrder("P003", "產品 C", 120)
+        ProductionOrder("P001", barcodeID = 4890008589241, "", "大紅", 250, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-946_800x800_freshmilk_front.png?auto=webp&format=png&width=2560&height=3200&fit=cover"),
+        ProductionOrder("P002", barcodeID = 123456, "","細紅", 180, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-236_800x800_freshmilk_front_-20_.png?auto=webp&format=png&width=2560&height=3200&fit=cover")
     )
 
-    private fun mockProducts() = listOf(
-        Product("P001", "產品 A", 60),
-        Product("P002", "產品 B", 50),
-        Product("P003", "產品 C", 40)
-    )
+//    private fun mockProducts() = listOf(
+//        Product("P001", "大紅", 60, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-946_800x800_freshmilk_front.png?auto=webp&format=png&width=2560&height=3200&fit=cover"),
+//        Product("P002", "細紅", 50, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-236_800x800_freshmilk_front_-20_.png?auto=webp&format=png&width=2560&height=3200&fit=cover")
+////        Product("P003", "產品 C", 40, imageUrl = "")
+//    )
 }
 
 data class ProductionOrder(
     val productId: String,
+    val barcodeID: Long?,
+    val qrcodeID: String?,
     val productName: String,
-    val totalQuantity: Int
+    val totalQuantity: Int,
+    val imageUrl: String?
 )

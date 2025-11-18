@@ -2,6 +2,7 @@ package com.kdl.rfidinventory.data.repository
 
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.model.*
+import kotlin.Int
 
 // BasketEntity 轉 Basket
 fun BasketEntity.toBasket(): Basket {
@@ -79,8 +80,11 @@ fun com.kdl.rfidinventory.data.remote.dto.response.BasketResponse.toBasket(): Ba
 fun com.kdl.rfidinventory.data.remote.dto.response.ProductionOrderResponse.toProductionOrder(): ProductionOrder {
     return ProductionOrder(
         productId = productId,
+        barcodeID = barcodeID,
+        qrcodeID = qrcodeID,
         productName = productName,
-        totalQuantity = totalQuantity
+        totalQuantity = totalQuantity,
+        imageUrl = imageUrl
     )
 }
 
