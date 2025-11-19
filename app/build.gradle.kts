@@ -49,6 +49,7 @@ dependencies {
 
     // RFID SDK
     implementation(files("libs/USDKLibrary-v1.0.0909.aar"))
+    implementation(libs.androidx.compose.ui.graphics)
 
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")

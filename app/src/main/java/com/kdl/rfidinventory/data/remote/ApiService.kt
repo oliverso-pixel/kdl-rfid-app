@@ -6,52 +6,11 @@ import retrofit2.http.*
 
 interface ApiService {
 //    // ==================== Production API ====================
-//    @GET("production/orders")
-//    suspend fun getProductionOrders(): ApiResponse<List<ProductionOrderResponse>>
-//
-//    @GET("products/{id}")
-//    suspend fun getProductById(@Path("id") productId: String): ApiResponse<ProductDetailResponse>
-//
-//    @POST("production/start")
-//    suspend fun startProduction(@Body request: ProductionStartRequest): ApiResponse<Unit>
-//
 //    // ==================== Warehouse API ====================
-//    @GET("warehouse/routes")
-//    suspend fun getRoutes(): ApiResponse<List<RouteResponse>>
-//
-//    @POST("warehouse/receiving")
-//    suspend fun receiveBasket(@Body request: ReceivingRequest): ApiResponse<Unit>
-//
-//    @POST("warehouse/shipping")
-//    suspend fun shipBasket(@Body request: ShippingRequest): ApiResponse<Unit>
-//
-////    // ==================== Shipping API ====================
-////    @GET("shipping/routes")
-////    suspend fun getRoutes(): ApiResponse<List<RouteResponse>>
-////
-////    @POST("shipping/ship")
-////    suspend fun shipBaskets(@Body request: ShipBasketsRequest): ApiResponse<Unit>
-//
+//    // ==================== Shipping API ====================
 //    // ==================== Sampling API ====================
-//    @POST("sampling/mark")
-//    suspend fun markForSampling(@Body request: SamplingRequest): ApiResponse<Unit>
-//
 //    // ==================== Clear API ====================
-//    @POST("baskets/clear")
-//    suspend fun clearBasketConfiguration(@Body request: ClearConfigurationRequest): ApiResponse<Unit>
-//
-//    @POST("clear/mark")
-//    suspend fun markForClear(@Body request: ClearRequest): ApiResponse<Unit>
-//
 //    // ==================== Admin API ====================
-//    @POST("admin/sync")
-//    suspend fun syncPendingOperations(@Body request: SyncRequest): ApiResponse<SyncResponse>
-//
-//    @GET("admin/settings")
-//    suspend fun getSettings(): ApiResponse<SettingsResponse>
-//
-//    @PUT("admin/settings")
-//    suspend fun updateSettings(@Body request: UpdateSettingsRequest): ApiResponse<Unit>
 
     // 籃子相關
     @POST("baskets/scan")

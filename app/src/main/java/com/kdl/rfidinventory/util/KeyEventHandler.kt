@@ -1,6 +1,7 @@
 package com.kdl.rfidinventory.util
 
 import android.view.KeyEvent
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -24,10 +25,10 @@ sealed class ScanTriggerEvent {
 class KeyEventHandler @Inject constructor() {
     private val _scanTriggerEvents = MutableSharedFlow<ScanTriggerEvent>(
         replay = 0,
-        extraBufferCapacity = 10  // 增加緩衝區防止事件丟失
+        extraBufferCapacity = 64, // 增加緩衝區防止事件丟失
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val scanTriggerEvents: SharedFlow<ScanTriggerEvent> = _scanTriggerEvents.asSharedFlow()
-
     private var isKeyPressed = false
 
     companion object {

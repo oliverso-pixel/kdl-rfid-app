@@ -4,16 +4,10 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.kdl.rfidinventory.data.model.Batch
-import com.kdl.rfidinventory.data.model.Product
-import com.kdl.rfidinventory.data.model.ScannedBasket
+import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.repository.ProductionRepository
-import com.kdl.rfidinventory.data.rfid.RFIDManager
 import com.kdl.rfidinventory.data.rfid.RFIDTag
-import com.kdl.rfidinventory.util.KeyEventHandler
-import com.kdl.rfidinventory.util.NetworkState
-import com.kdl.rfidinventory.util.ScanMode
-import com.kdl.rfidinventory.util.ScanTriggerEvent
+import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -25,9 +19,8 @@ import javax.inject.Inject
 @RequiresApi(Build.VERSION_CODES.O)
 @HiltViewModel
 class ProductionViewModel @Inject constructor(
-    private val rfidManager: RFIDManager,
-    private val productionRepository: ProductionRepository,
-    val keyEventHandler: KeyEventHandler
+    private val scanManager: ScanManager,
+    private val productionRepository: ProductionRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProductionUiState())
@@ -36,122 +29,66 @@ class ProductionViewModel @Inject constructor(
     private val _networkState = MutableStateFlow<NetworkState>(NetworkState.Connected)
     val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
 
+    val scanState = scanManager.scanState
+
     init {
         Timber.d("ProductionViewModel initialized")
         loadProducts()
-        observeKeyEvents()
+        initializeScanManager()
+        observeScanResults()
+        observeScanErrors()
     }
 
-    /**
-     * 監聽實體按鍵事件
-     * 單次掃描模式：按鍵觸發 QR/Barcode 掃描
-     * 連續掃描模式：按下開始 RFID 掃描，放開停止掃描
-     */
     @RequiresApi(Build.VERSION_CODES.O)
-    private fun observeKeyEvents() {
-        Timber.d("Setting up key event observer")
+    private fun initializeScanManager() {
+        scanManager.initialize(
+            scope = viewModelScope,
+            scanMode = _uiState.map { it.scanMode }.stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                ScanMode.SINGLE
+            ),
+            canStartScan = {
+                // 檢查是否已選擇產品和批次（除了產品搜索場景）
+                val state = _uiState.value
+                state.showProductDialog || (state.selectedProduct != null && state.selectedBatch != null)
+            }
+        )
+    }
 
+    private fun observeScanResults() {
         viewModelScope.launch {
-            keyEventHandler.scanTriggerEvents
-                .onStart { Timber.d("Key event flow started") }
-                .onCompletion { Timber.d("Key event flow completed") }
-                .catch { e -> Timber.e(e, "Key event flow error") }
-                .collect { event ->
-                    val currentState = _uiState.value
-                    val currentMode = currentState.scanMode
-                    val isCurrentlyScanning = currentState.isScanning
-                    val currentScanType = currentState.scanType
-
-                    Timber.d("🔑 KeyEvent: $event | Mode: $currentMode | Scanning: $isCurrentlyScanning | Type: $currentScanType | ProductDialog: ${currentState.showProductDialog}")
-
-                    when (event) {
-                        is ScanTriggerEvent.StartScan -> {
-                            Timber.d("📱 Key trigger: Start scan")
-
-                            // ⭐ 如果在產品對話框中，忽略按鍵（自動掃描已啟動）
-                            if (currentState.showProductDialog) {
-                                Timber.d("⏭️ In product dialog, automatic scan is active, ignoring key")
-                                return@collect
+            scanManager.scanResults.collect { result ->
+                when (result) {
+                    is ScanResult.BarcodeScanned -> {
+                        when (result.context) {
+                            ScanContext.PRODUCT_SEARCH -> {
+                                // 產品搜索
+                                updateProductSearchQuery(result.barcode)
                             }
-
-                            // 檢查是否已選擇產品和批次
-                            if (currentState.selectedProduct == null || currentState.selectedBatch == null) {
-                                Timber.w("⚠️ Cannot scan: Product or batch not selected")
-                                _uiState.update { it.copy(error = "請先選擇產品和批次") }
-                                return@collect
+                            ScanContext.BASKET_SCAN -> {
+                                // 籃子掃描
+                                handleScannedBarcode(result.barcode)
                             }
-
-                            when (currentMode) {
-                                ScanMode.SINGLE -> {
-                                    if (!isCurrentlyScanning) {
-                                        Timber.d("✅ Single mode: Triggering barcode scan")
-                                        startBarcodeScan()
-                                    } else {
-                                        Timber.d("⏭️ Single mode: Already scanning ($currentScanType), ignoring")
-                                    }
-                                }
-                                ScanMode.CONTINUOUS -> {
-                                    if (!isCurrentlyScanning) {
-                                        Timber.d("✅ Continuous mode: Starting RFID scan")
-                                        startRfidScan()
-                                    } else {
-                                        Timber.d("⏭️ Continuous mode: Already scanning ($currentScanType)")
-                                    }
-                                }
-                            }
-                        }
-
-                        is ScanTriggerEvent.StopScan -> {
-                            Timber.d("🛑 Key trigger: Stop scan")
-
-                            // ⭐ 如果在產品對話框中，忽略停止事件
-                            if (currentState.showProductDialog) {
-                                Timber.d("⏭️ In product dialog, ignoring stop scan")
-                                return@collect
-                            }
-
-                            when (currentMode) {
-                                ScanMode.SINGLE -> {
-                                    Timber.d("⏭️ Single mode: Key release ignored (auto-stop)")
-                                }
-                                ScanMode.CONTINUOUS -> {
-                                    if (isCurrentlyScanning) {
-                                        Timber.d("✅ Continuous mode: Stopping scan (type was: $currentScanType)")
-                                        stopScanning()
-
-                                        viewModelScope.launch {
-                                            kotlinx.coroutines.delay(150)
-                                            val stillScanning = _uiState.value.isScanning
-                                            if (stillScanning) {
-                                                Timber.w("⚠️ Still scanning after stop! Type: ${_uiState.value.scanType}")
-                                                Timber.w("🔧 Forcing complete stop...")
-                                                rfidManager.stopScan()
-                                                _uiState.update {
-                                                    it.copy(
-                                                        isScanning = false,
-                                                        scanType = ScanType.NONE
-                                                    )
-                                                }
-                                            } else {
-                                                Timber.d("✅ Scan successfully stopped and verified")
-                                            }
-                                        }
-                                    } else {
-                                        Timber.d("⏭️ Not scanning, ignoring stop trigger")
-                                    }
-                                }
-                            }
-                        }
-
-                        is ScanTriggerEvent.ClearList -> {
-                            Timber.d("🗑️ Key trigger: Clear list")
-                            clearBaskets()
                         }
                     }
+                    is ScanResult.RfidScanned -> {
+                        handleScannedRfidTag(result.tag)
+                    }
+                    is ScanResult.ClearListRequested -> {
+                        clearBaskets()
+                    }
                 }
+            }
         }
+    }
 
-        Timber.d("Key event observer setup complete")
+    private fun observeScanErrors() {
+        viewModelScope.launch {
+            scanManager.errors.collect { error ->
+                _uiState.update { it.copy(error = error) }
+            }
+        }
     }
 
     private fun loadProducts() {
@@ -169,20 +106,10 @@ class ProductionViewModel @Inject constructor(
                             imageUrl = order.imageUrl
                         )
                     }
-                    _uiState.update {
-                        it.copy(
-                            products = products,
-                            isLoading = false
-                        )
-                    }
+                    _uiState.update { it.copy(products = products, isLoading = false) }
                 }
                 .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            error = error.message,
-                            isLoading = false
-                        )
-                    }
+                    _uiState.update { it.copy(error = error.message, isLoading = false) }
                 }
         }
     }
@@ -191,7 +118,6 @@ class ProductionViewModel @Inject constructor(
     fun updateProductSearchQuery(query: String) {
         _uiState.update { it.copy(productSearchQuery = query) }
 
-        // ⭐ 如果查詢內容足夠長且只有一個匹配，自動選擇
         if (query.length >= 6) {
             val filteredProducts = _uiState.value.products.filter { product ->
                 product.id.lowercase().contains(query.lowercase()) ||
@@ -201,7 +127,7 @@ class ProductionViewModel @Inject constructor(
             }
 
             if (filteredProducts.size == 1) {
-                Timber.d("🎯 Auto-selecting product from barcode scan: ${filteredProducts.first().name}")
+                Timber.d("🎯 Auto-selecting product: ${filteredProducts.first().name}")
                 viewModelScope.launch {
                     kotlinx.coroutines.delay(300)
                     selectProduct(filteredProducts.first())
@@ -214,87 +140,21 @@ class ProductionViewModel @Inject constructor(
         _uiState.update { it.copy(productSearchQuery = "") }
     }
 
-    /**
-     * ⭐ 在產品選擇對話框中進行條碼掃描
-     */
-    @RequiresApi(Build.VERSION_CODES.O)
-    private fun startProductSearchBarcodeScan() {
-        Timber.d("🚀 Starting barcode scan for product search")
-
-        // ⭐ 標記為正在掃描產品
-        _uiState.update { it.copy(isScanning = true, scanType = ScanType.BARCODE_PRODUCT) }
-
-        viewModelScope.launch {
-            try {
-                rfidManager.startBarcodeScan()
-                    .catch { error ->
-                        Timber.e(error, "Product search barcode scan error")
-                        _uiState.update {
-                            it.copy(
-                                error = "條碼掃描失敗: ${error.message}",
-                                isScanning = false,
-                                scanType = ScanType.NONE
-                            )
-                        }
-                    }
-                    .collect { barcode ->
-                        Timber.d("📦 Product search barcode scanned: $barcode")
-
-                        // ⭐ 只有在對話框仍然打開時才處理
-                        if (_uiState.value.showProductDialog) {
-                            Timber.d("🔍 Updating product search query with: $barcode")
-                            updateProductSearchQuery(barcode)
-                        } else {
-                            Timber.w("⚠️ Dialog already closed, ignoring barcode: $barcode")
-                        }
-
-                        // 停止掃描但保持對話框打開，等待可能的下一次掃描
-                        _uiState.update {
-                            it.copy(
-                                isScanning = false,
-                                scanType = ScanType.NONE
-                            )
-                        }
-
-                        // ⭐ 如果對話框仍然打開，重新啟動掃描等待下一個條碼
-                        kotlinx.coroutines.delay(500)  // 短暫延遲
-                        if (_uiState.value.showProductDialog) {
-                            Timber.d("🔄 Restarting barcode scan for next product")
-                            startProductSearchBarcodeScan()
-                        }
-                    }
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to start product search barcode scan")
-                _uiState.update {
-                    it.copy(
-                        error = "啟動條碼掃描失敗: ${e.message}",
-                        isScanning = false,
-                        scanType = ScanType.NONE
-                    )
-                }
-            }
-        }
-    }
-
     @RequiresApi(Build.VERSION_CODES.O)
     fun selectProduct(product: Product) {
         Timber.d("✅ Product selected: ${product.name}")
-
-        // ⭐ 停止產品搜索掃描
-        if (_uiState.value.scanType == ScanType.BARCODE_PRODUCT) {
-            Timber.d("🛑 Stopping product search scan")
-            rfidManager.stopScan()
-        }
 
         _uiState.update {
             it.copy(
                 selectedProduct = product,
                 showProductDialog = false,
-                productSearchQuery = "",
-                isScanning = false,
-                scanType = ScanType.NONE
+                productSearchQuery = ""
             )
         }
+
+        // 停止產品搜索掃描
+        scanManager.stopScanning()
+
         loadBatchesForProduct(product.id)
     }
 
@@ -307,270 +167,45 @@ class ProductionViewModel @Inject constructor(
                 totalQuantity = 1000,
                 remainingQuantity = 500,
                 productionDate = LocalDate.now().format(DateTimeFormatter.ISO_DATE)
-            ),
-            Batch(
-                id = "BATCH-2025-002",
-                productId = productId,
-                totalQuantity = 800,
-                remainingQuantity = 300,
-                productionDate = LocalDate.now().minusDays(1).format(DateTimeFormatter.ISO_DATE)
             )
         )
         _uiState.update { it.copy(batches = mockBatches, showBatchDialog = true) }
     }
 
     fun selectBatch(batch: Batch) {
-        _uiState.update {
-            it.copy(
-                selectedBatch = batch,
-                showBatchDialog = false
-            )
-        }
+        _uiState.update { it.copy(selectedBatch = batch, showBatchDialog = false) }
     }
 
-    /**
-     * ⭐ UI 按鈕觸發的掃描（支持兩種模式）
-     * - SINGLE 模式：點擊開始 RFID 近距離掃描，掃到後自動停止
-     * - CONTINUOUS 模式：點擊開始連續 RFID 掃描，再次點擊停止
-     */
     fun toggleScanFromButton() {
-        val selectedProduct = _uiState.value.selectedProduct
-        val selectedBatch = _uiState.value.selectedBatch
-
-        if (selectedProduct == null || selectedBatch == null) {
-            Timber.w("Cannot start scan: Product or batch not selected")
-            _uiState.update { it.copy(error = "請先選擇產品和批次") }
-            return
-        }
-
-        if (_uiState.value.isScanning) {
-            // 如果正在掃描，則停止（適用於連續模式）
-            Timber.d("🛑 Stopping scan from UI button")
-            stopScanning()
-        } else {
-            // 根據當前模式開始掃描
-            when (_uiState.value.scanMode) {
-                ScanMode.SINGLE -> {
-                    Timber.d("🚀 Starting RFID scan from UI button (SINGLE mode - short range)")
-                    startRfidScan()
-                }
-                ScanMode.CONTINUOUS -> {
-                    Timber.d("🚀 Starting RFID scan from UI button (CONTINUOUS mode)")
-                    startRfidScan()
-                }
-            }
-        }
-    }
-
-    /**
-     * ⭐ 開始條碼掃描（QR/Barcode）
-     * 由實體按鍵觸發（僅在 SINGLE 模式）
-     */
-    private fun startBarcodeScan() {
-        Timber.d("🚀 Starting barcode scan (triggered by physical button)")
-        _uiState.update { it.copy(isScanning = true, scanType = ScanType.BARCODE) }
-
         viewModelScope.launch {
-            try {
-                rfidManager.startBarcodeScan()
-                    .catch { error ->
-                        Timber.e(error, "Barcode scan error")
-                        _uiState.update {
-                            it.copy(
-                                error = "條碼掃描失敗: ${error.message}",
-                                isScanning = false,
-                                scanType = ScanType.NONE
-                            )
-                        }
-                    }
-                    .collect { barcode ->
-                        Timber.d("📦 Barcode scanned: $barcode")
-                        handleScannedBarcode(barcode)
+            val isScanning = scanManager.scanState.value.isScanning
 
-                        // ⭐ 條碼掃描後自動停止並確保狀態清理
-                        Timber.d("⏹️ Barcode scan complete, stopping...")
-                        _uiState.update {
-                            it.copy(
-                                isScanning = false,
-                                scanType = ScanType.NONE
-                            )
-                        }
+            if (_uiState.value.selectedProduct == null || _uiState.value.selectedBatch == null) {
+                _uiState.update { it.copy(error = "請先選擇產品和批次") }
+                return@launch
+            }
 
-                        // ⭐ 確保 RFIDManager 也停止
-                        rfidManager.stopScan()
-                        Timber.d("✅ Barcode scan fully stopped")
-                    }
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to start barcode scan")
-                _uiState.update {
-                    it.copy(
-                        error = "啟動條碼掃描失敗: ${e.message}",
-                        isScanning = false,
-                        scanType = ScanType.NONE
-                    )
-                }
+            if (isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_uiState.value.scanMode)
             }
         }
     }
 
-    /**
-     * ⭐ 開始 RFID 掃描
-     * 支持兩種觸發方式：
-     * 1. UI 按鈕觸發（SINGLE 和 CONTINUOUS 模式）
-     * 2. 實體按鍵觸發（僅 CONTINUOUS 模式）
-     */
-    private fun startRfidScan() {
-        val mode = _uiState.value.scanMode
-        val currentScanType = _uiState.value.scanType
-
-        Timber.d("🚀 Starting RFID scan with mode: $mode (current scanType: $currentScanType)")
-
-        // ⭐ 如果已經在掃描，先停止
-        if (_uiState.value.isScanning) {
-            Timber.w("⚠️ Already scanning, stopping previous scan first")
-            stopScanning()
-            // 等待一小段時間
-            viewModelScope.launch {
-                kotlinx.coroutines.delay(100)
-                actuallyStartRfidScan(mode)
-            }
-        } else {
-            actuallyStartRfidScan(mode)
-        }
-    }
-
-    private fun actuallyStartRfidScan(mode: ScanMode) {
-        Timber.d("🔄 Actually starting RFID scan with mode: $mode")
-        _uiState.update { it.copy(isScanning = true, scanType = ScanType.RFID) }
-
-        viewModelScope.launch {
-            try {
-                rfidManager.startScan(mode)
-                    .catch { error ->
-                        Timber.e(error, "RFID scan error")
-                        _uiState.update {
-                            it.copy(
-                                error = "RFID掃描失敗: ${error.message}",
-                                isScanning = false,
-                                scanType = ScanType.NONE
-                            )
-                        }
-                    }
-                    .collect { tag ->
-                        Timber.d("📡 RFID Tag scanned: ${tag.uid}")
-                        handleScannedRfidTag(tag)
-
-                        // ⭐ SINGLE 模式下 RFID 掃描後自動停止
-                        if (mode == ScanMode.SINGLE) {
-                            Timber.d("⏹️ SINGLE mode: Auto-stopping RFID scan after tag read")
-                            stopScanning()
-                        }
-                        // CONTINUOUS 模式會持續掃描，直到手動停止
-                    }
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to start RFID scan")
-                _uiState.update {
-                    it.copy(
-                        error = "啟動RFID掃描失敗: ${e.message}",
-                        isScanning = false,
-                        scanType = ScanType.NONE
-                    )
-                }
-            }
-        }
-    }
-
-    fun stopScanning() {
-        val currentScanType = _uiState.value.scanType
-        val wasScanning = _uiState.value.isScanning
-        val currentMode = _uiState.value.scanMode
-
-        Timber.d("🛑 Stopping scan (mode: $currentMode, type: $currentScanType, wasScanning: $wasScanning)")
-
-        // ⭐ 停止 RFID Manager
-        try {
-            rfidManager.stopScan()
-            Timber.d("✅ RFIDManager.stopScan() called")
-        } catch (e: Exception) {
-            Timber.e(e, "❌ Error stopping RFID scan")
-        }
-
-        // ⭐ 立即更新 UI 狀態
-        _uiState.update {
-            it.copy(
-                isScanning = false,
-                scanType = ScanType.NONE
-            )
-        }
-
-        Timber.d("✅ Scan stopped, UI state updated (isScanning: ${_uiState.value.isScanning}, scanType: ${_uiState.value.scanType})")
-    }
-
-    /**
-     * ⭐ 處理掃描到的條碼
-     */
     private fun handleScannedBarcode(barcode: String) {
         Timber.d("🔍 Processing barcode: $barcode")
-
-        val product = _uiState.value.selectedProduct ?: return
-
-        // 檢查是否重複掃描
-        val existingBasketIndex = _uiState.value.scannedBaskets.indexOfFirst { it.uid == barcode }
-
-        if (existingBasketIndex != -1) {
-            // 重複掃描
-            val existingBasket = _uiState.value.scannedBaskets[existingBasketIndex]
-            val updatedBasket = existingBasket.copy(
-                scanCount = existingBasket.scanCount + 1,
-                lastScannedTime = System.currentTimeMillis()
-            )
-
-            _uiState.update { state ->
-                state.copy(
-                    scannedBaskets = state.scannedBaskets.toMutableList().apply {
-                        set(existingBasketIndex, updatedBasket)
-                    },
-                    totalScanCount = state.totalScanCount + 1
-                )
-            }
-
-            Timber.d("🔁 Duplicate barcode scan: $barcode, count: ${updatedBasket.scanCount}")
-            _uiState.update {
-                it.copy(
-                    successMessage = "籃子 ${barcode.takeLast(8)} 重複掃描 (第 ${updatedBasket.scanCount} 次)"
-                )
-            }
-        } else {
-            // 新條碼
-            val newBasket = ScannedBasket(
-                uid = barcode,
-                quantity = product.maxBasketCapacity,
-                rssi = 0,  // 條碼沒有信號強度
-                scanCount = 1,
-                firstScannedTime = System.currentTimeMillis(),
-                lastScannedTime = System.currentTimeMillis()
-            )
-
-            _uiState.update { state ->
-                state.copy(
-                    scannedBaskets = state.scannedBaskets + newBasket,
-                    totalScanCount = state.totalScanCount + 1
-                )
-            }
-
-            Timber.d("✨ New barcode scanned: $barcode")
-        }
+        addOrUpdateBasket(barcode, rssi = 0)
     }
 
-    /**
-     * ⭐ 處理掃描到的 RFID 標籤
-     */
     private fun handleScannedRfidTag(tag: RFIDTag) {
         Timber.d("🔍 Processing RFID tag: ${tag.uid}")
+        addOrUpdateBasket(tag.uid, rssi = tag.rssi)
+    }
 
+    private fun addOrUpdateBasket(uid: String, rssi: Int) {
         val product = _uiState.value.selectedProduct ?: return
-
-        val existingBasketIndex = _uiState.value.scannedBaskets.indexOfFirst { it.uid == tag.uid }
+        val existingBasketIndex = _uiState.value.scannedBaskets.indexOfFirst { it.uid == uid }
 
         if (existingBasketIndex != -1) {
             // 重複掃描
@@ -578,7 +213,7 @@ class ProductionViewModel @Inject constructor(
             val updatedBasket = existingBasket.copy(
                 scanCount = existingBasket.scanCount + 1,
                 lastScannedTime = System.currentTimeMillis(),
-                rssi = tag.rssi  // 更新信號強度
+                rssi = rssi
             )
 
             _uiState.update { state ->
@@ -586,22 +221,16 @@ class ProductionViewModel @Inject constructor(
                     scannedBaskets = state.scannedBaskets.toMutableList().apply {
                         set(existingBasketIndex, updatedBasket)
                     },
-                    totalScanCount = state.totalScanCount + 1
-                )
-            }
-
-            Timber.d("🔁 Duplicate RFID scan: ${tag.uid}, count: ${updatedBasket.scanCount}")
-            _uiState.update {
-                it.copy(
-                    successMessage = "籃子 ${tag.uid.takeLast(8)} 重複掃描 (第 ${updatedBasket.scanCount} 次)"
+                    totalScanCount = state.totalScanCount + 1,
+                    successMessage = "籃子 ${uid.takeLast(8)} 重複掃描 (第 ${updatedBasket.scanCount} 次)"
                 )
             }
         } else {
-            // 新標籤
+            // 新籃子
             val newBasket = ScannedBasket(
-                uid = tag.uid,
+                uid = uid,
                 quantity = product.maxBasketCapacity,
-                rssi = tag.rssi,
+                rssi = rssi,
                 scanCount = 1,
                 firstScannedTime = System.currentTimeMillis(),
                 lastScannedTime = System.currentTimeMillis()
@@ -613,8 +242,6 @@ class ProductionViewModel @Inject constructor(
                     totalScanCount = state.totalScanCount + 1
                 )
             }
-
-            Timber.d("✨ New RFID tag scanned: ${tag.uid}")
         }
     }
 
@@ -622,11 +249,7 @@ class ProductionViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 scannedBaskets = state.scannedBaskets.map { basket ->
-                    if (basket.uid == uid) {
-                        basket.copy(quantity = newQuantity)
-                    } else {
-                        basket
-                    }
+                    if (basket.uid == uid) basket.copy(quantity = newQuantity) else basket
                 }
             )
         }
@@ -642,8 +265,6 @@ class ProductionViewModel @Inject constructor(
                 totalScanCount = (state.totalScanCount - scanCountToRemove).coerceAtLeast(0)
             )
         }
-
-        Timber.d("🗑️ Basket removed: $uid, removed $scanCountToRemove scans")
     }
 
     fun resetBasketScanCount(uid: String) {
@@ -660,15 +281,11 @@ class ProductionViewModel @Inject constructor(
                             firstScannedTime = System.currentTimeMillis(),
                             lastScannedTime = System.currentTimeMillis()
                         )
-                    } else {
-                        basket
-                    }
+                    } else basket
                 },
                 totalScanCount = (state.totalScanCount - scanCountDifference).coerceAtLeast(state.scannedBaskets.size)
             )
         }
-
-        Timber.d("🔄 Basket scan count reset: $uid")
     }
 
     fun submitProduction() {
@@ -707,60 +324,42 @@ class ProductionViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isLoading = false,
-                    successMessage = "✅ 成功提交: $successCount 個，失敗: $failCount 個\n可繼續掃描下一批籃子",
+                    successMessage = "✅ 成功: $successCount 個，失敗: $failCount 個",
                     scannedBaskets = emptyList(),
-                    totalScanCount = 0,
+                    totalScanCount = 0
                 )
             }
-
-            Timber.d("📤 Production submitted: success=$successCount, fail=$failCount")
         }
     }
 
     fun setScanMode(mode: ScanMode) {
-        val oldMode = _uiState.value.scanMode
-
-        Timber.d("🔄 Changing scan mode from $oldMode to $mode")
-
-        // ⭐ 如果正在掃描，先停止
-        if (_uiState.value.isScanning) {
-            Timber.d("⏹️ Stopping active scan before mode change")
-            stopScanning()
-        }
-
-        // ⭐ 等待一小段時間確保完全停止
         viewModelScope.launch {
-            kotlinx.coroutines.delay(200)
-
-            // ⭐ 完全重置掃描相關狀態
-            _uiState.update {
-                it.copy(
-                    scanMode = mode,
-                    isScanning = false,
-                    scanType = ScanType.NONE
-                )
-            }
-
-            Timber.d("✅ Scan mode changed to: $mode, state reset complete")
+            scanManager.changeScanMode(mode)
+            _uiState.update { it.copy(scanMode = mode) }
         }
     }
 
     fun showProductDialog() {
-        Timber.d("📂 Opening product dialog")
+        _uiState.update { it.copy(showProductDialog = true, productSearchQuery = "") }
+
+        // 延遲啟動產品搜索掃描
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(300)
+            if (_uiState.value.showProductDialog) {
+                scanManager.startBarcodeScan(ScanContext.PRODUCT_SEARCH)
+            }
+        }
+    }
+
+    fun dismissDialog() {
+        scanManager.stopScanning()
         _uiState.update {
             it.copy(
-                showProductDialog = true,
+                showProductDialog = false,
+                showBatchDialog = false,
+                showConfirmDialog = false,
                 productSearchQuery = ""
             )
-        }
-
-        // ⭐ 延遲啟動條碼掃描，確保對話框已經完全顯示
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(300)  // 等待對話框完全渲染
-            if (_uiState.value.showProductDialog) {
-                Timber.d("🎯 Auto-starting barcode scan for product dialog")
-                startProductSearchBarcodeScan()
-            }
         }
     }
 
@@ -772,27 +371,6 @@ class ProductionViewModel @Inject constructor(
         _uiState.update { it.copy(showConfirmDialog = true) }
     }
 
-    fun dismissDialog() {
-        // ⭐ 關閉對話框時停止掃描
-        val wasShowingProductDialog = _uiState.value.showProductDialog
-
-        if (wasShowingProductDialog) {
-            Timber.d("🛑 Closing product dialog, stopping barcode scan")
-            rfidManager.stopScan()
-        }
-
-        _uiState.update {
-            it.copy(
-                showProductDialog = false,
-                showBatchDialog = false,
-                showConfirmDialog = false,
-                productSearchQuery = "",
-                isScanning = false,  // ⭐ 確保清除掃描狀態
-                scanType = ScanType.NONE
-            )
-        }
-    }
-
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
@@ -802,55 +380,36 @@ class ProductionViewModel @Inject constructor(
     }
 
     fun resetAll() {
-        stopScanning()
+        scanManager.stopScanning()
         _uiState.update {
             it.copy(
                 selectedProduct = null,
                 selectedBatch = null,
                 scannedBaskets = emptyList(),
-                isScanning = false,
-                scanType = ScanType.NONE,
                 totalScanCount = 0
             )
         }
-        Timber.d("🔄 All reset")
     }
 
     fun clearBaskets() {
-        stopScanning()
+        scanManager.stopScanning()
         _uiState.update {
             it.copy(
                 scannedBaskets = emptyList(),
-                totalScanCount = 0,
-                isScanning = false,
-                scanType = ScanType.NONE
+                totalScanCount = 0
             )
         }
-        Timber.d("🗑️ Baskets cleared")
     }
 
     override fun onCleared() {
         super.onCleared()
-        Timber.d("ProductionViewModel cleared")
-        stopScanning()
+        scanManager.stopScanning()
     }
-}
-
-/**
- * ⭐ 掃描類型枚舉
- */
-enum class ScanType {
-    NONE,
-    BARCODE,
-    BARCODE_PRODUCT,
-    RFID
 }
 
 data class ProductionUiState(
     val isLoading: Boolean = false,
-    val isScanning: Boolean = false,
     val scanMode: ScanMode = ScanMode.SINGLE,
-    val scanType: ScanType = ScanType.NONE,
     val products: List<Product> = emptyList(),
     val batches: List<Batch> = emptyList(),
     val productSearchQuery: String = "",

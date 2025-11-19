@@ -1,22 +1,25 @@
 package com.kdl.rfidinventory.presentation.ui.screens.warehouse.receiving
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
+import com.kdl.rfidinventory.data.repository.Warehouse
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
-import com.kdl.rfidinventory.data.rfid.RFIDManager
-import com.kdl.rfidinventory.data.rfid.RFIDTag
-import com.kdl.rfidinventory.util.NetworkState
-import com.kdl.rfidinventory.util.ScanMode
+import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import timber.log.Timber
+import java.util.UUID
 import javax.inject.Inject
 
+@RequiresApi(Build.VERSION_CODES.O)
 @HiltViewModel
 class ReceivingViewModel @Inject constructor(
-    private val rfidManager: RFIDManager,
+    private val scanManager: ScanManager,
     private val warehouseRepository: WarehouseRepository
 ) : ViewModel() {
 
@@ -26,102 +29,278 @@ class ReceivingViewModel @Inject constructor(
     private val _networkState = MutableStateFlow<NetworkState>(NetworkState.Connected)
     val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
 
-    private val scannedBaskets = mutableMapOf<String, Basket>()
+    val scanState = scanManager.scanState
 
-    fun startScanning() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isScanning = true) }
-            rfidManager.startScan(_uiState.value.scanMode)
-                .catch { error ->
-                    _uiState.update {
-                        it.copy(
-                            error = "掃描失敗: ${error.message}",
-                            isScanning = false
-                        )
-                    }
-                }
-                .collect { tag ->
-                    handleScannedTag(tag)
-                }
-        }
+    init {
+        Timber.d("ReceivingViewModel initialized")
+        loadWarehouses()
+        initializeScanManager()
+        observeScanResults()
+        observeScanErrors()
     }
 
-    fun stopScanning() {
-        rfidManager.stopScan()
-        _uiState.update { it.copy(isScanning = false) }
-    }
-
-    private fun handleScannedTag(tag: RFIDTag) {
+    // ⭐ 載入倉庫列表
+    private fun loadWarehouses() {
         viewModelScope.launch {
-            // 檢查是否已掃描
-            if (scannedBaskets.containsKey(tag.uid)) {
-                _uiState.update { it.copy(error = "籃子已掃描: ${tag.uid}") }
-                return@launch
-            }
+            _uiState.update { it.copy(isLoadingWarehouses = true) }
 
-            // 從資料庫查詢籃子信息
-            warehouseRepository.getBasketByUid(tag.uid)
-                .onSuccess { basket ->
-                    // 檢查籃子狀態
-                    if (basket.status != BasketStatus.IN_PRODUCTION) {
-                        _uiState.update {
-                            it.copy(error = "籃子狀態錯誤: ${basket.status.name}")
-                        }
-                        return@onSuccess
-                    }
-
-                    scannedBaskets[tag.uid] = basket
+            warehouseRepository.getWarehouses()
+                .onSuccess { warehouses ->
                     _uiState.update {
                         it.copy(
-                            scannedBaskets = scannedBaskets.values.toList(),
-                            totalQuantity = scannedBaskets.values.sumOf { b -> b.quantity }
+                            warehouses = warehouses.filter { w -> w.isActive },
+                            isLoadingWarehouses = false
                         )
-                    }
-
-                    // 單次掃描模式下停止
-                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                        stopScanning()
                     }
                 }
                 .onFailure { error ->
+                    Timber.e(error, "Failed to load warehouses")
                     _uiState.update {
-                        it.copy(error = "查詢失敗: ${error.message}")
+                        it.copy(
+                            isLoadingWarehouses = false,
+                            error = "載入倉庫列表失敗: ${error.message}"
+                        )
                     }
                 }
         }
     }
 
-    fun removeBasket(uid: String) {
-        scannedBaskets.remove(uid)
+    // ⭐ 選擇倉庫
+    fun selectWarehouse(warehouse: Warehouse) {
         _uiState.update {
             it.copy(
-                scannedBaskets = scannedBaskets.values.toList(),
-                totalQuantity = scannedBaskets.values.sumOf { b -> b.quantity }
+                selectedWarehouse = warehouse,
+                showWarehouseDialog = false
+            )
+        }
+        Timber.d("📍 倉庫已選擇: ${warehouse.name} (${warehouse.id})")
+    }
+
+    // ⭐ 顯示/隱藏倉庫選擇對話框
+    fun showWarehouseDialog() {
+        _uiState.update { it.copy(showWarehouseDialog = true) }
+    }
+
+    fun dismissWarehouseDialog() {
+        _uiState.update { it.copy(showWarehouseDialog = false) }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun initializeScanManager() {
+        scanManager.initialize(
+            scope = viewModelScope,
+            scanMode = _uiState.map { it.scanMode }.stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                ScanMode.SINGLE
+            ),
+            canStartScan = {
+                // ⭐ 必須先選擇倉庫才能掃描
+                _uiState.value.selectedWarehouse != null
+            }
+        )
+    }
+
+    private fun observeScanResults() {
+        viewModelScope.launch {
+            scanManager.scanResults.collect { result ->
+                when (result) {
+                    is ScanResult.BarcodeScanned -> {
+                        handleScannedBarcode(result.barcode)
+                    }
+                    is ScanResult.RfidScanned -> {
+                        handleScannedRfidTag(result.tag.uid)
+                    }
+                    is ScanResult.ClearListRequested -> {
+                        clearBaskets()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun observeScanErrors() {
+        viewModelScope.launch {
+            scanManager.errors.collect { error ->
+                _uiState.update { it.copy(error = error) }
+            }
+        }
+    }
+
+    fun toggleScanFromButton() {
+        // ⭐ 檢查是否已選擇倉庫
+        if (_uiState.value.selectedWarehouse == null) {
+            _uiState.update { it.copy(error = "請先選擇倉庫位置") }
+            return
+        }
+
+        viewModelScope.launch {
+            val isScanning = scanManager.scanState.value.isScanning
+
+            if (isScanning) {
+                Timber.d("🛑 Stopping scan from UI button")
+                scanManager.stopScanning()
+            } else {
+                Timber.d("🚀 Starting scan from UI button")
+                scanManager.startRfidScan(_uiState.value.scanMode)
+            }
+        }
+    }
+
+    private fun handleScannedBarcode(barcode: String) {
+        Timber.d("🔍 Processing barcode: $barcode")
+        fetchAndValidateBasket(barcode)
+    }
+
+    private fun handleScannedRfidTag(uid: String) {
+        Timber.d("🔍 Processing RFID tag: $uid")
+        fetchAndValidateBasket(uid)
+    }
+
+    private fun fetchAndValidateBasket(uid: String) {
+        if (_uiState.value.scannedBaskets.any { it.basket.uid == uid }) {
+            _uiState.update { it.copy(error = "籃子已掃描: ${uid.takeLast(8)}") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isValidating = true) }
+
+            warehouseRepository.getBasketByUid(uid)
+                .onSuccess { basket ->
+                    Timber.d("✅ Basket fetched: ${basket.uid}, Status: ${basket.status}")
+
+                    val isValidStatus = basket.status == BasketStatus.IN_PRODUCTION
+
+                    val statusMessage = if (!isValidStatus) {
+                        when (basket.status) {
+                            BasketStatus.UNASSIGNED -> "⚠️ 狀態錯誤：未配置"
+                            BasketStatus.RECEIVED -> "⚠️ 狀態錯誤：已收貨"
+                            BasketStatus.IN_STOCK -> "⚠️ 狀態錯誤：已在庫"
+                            BasketStatus.SHIPPED -> "⚠️ 狀態錯誤：已出貨"
+                            BasketStatus.SAMPLING -> "⚠️ 狀態錯誤：抽樣中"
+                            else -> "⚠️ 狀態錯誤：${basket.status.name}"
+                        }
+                    } else {
+                        "✅ 籃子 ${uid.takeLast(8)} 已加入"
+                    }
+
+                    val item = ScannedBasketItem(
+                        id = UUID.randomUUID().toString(),
+                        basket = basket
+                    )
+
+                    _uiState.update { state ->
+                        state.copy(
+                            scannedBaskets = state.scannedBaskets + item,
+                            totalQuantity = state.totalQuantity + basket.quantity,
+                            isValidating = false,
+                            successMessage = if (isValidStatus) statusMessage else null,
+                            error = if (!isValidStatus) statusMessage else null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    Timber.e(error, "Failed to fetch basket")
+                    _uiState.update {
+                        it.copy(
+                            isValidating = false,
+                            error = "查詢籃子失敗: ${error.message}"
+                        )
+                    }
+                }
+        }
+    }
+
+    fun updateBasketQuantity(uid: String, newQuantity: Int) {
+        _uiState.update { state ->
+            state.copy(
+                scannedBaskets = state.scannedBaskets.map { item ->
+                    if (item.basket.uid == uid) {
+                        val oldQuantity = item.basket.quantity
+                        val updatedBasket = item.basket.copy(quantity = newQuantity)
+                        val quantityDiff = newQuantity - oldQuantity
+
+                        _uiState.update { it.copy(totalQuantity = it.totalQuantity + quantityDiff) }
+
+                        item.copy(basket = updatedBasket)
+                    } else {
+                        item
+                    }
+                }
             )
         }
     }
 
+    fun removeBasket(uid: String) {
+        val item = _uiState.value.scannedBaskets.find { it.basket.uid == uid }
+
+        _uiState.update { state ->
+            state.copy(
+                scannedBaskets = state.scannedBaskets.filter { it.basket.uid != uid },
+                totalQuantity = (state.totalQuantity - (item?.basket?.quantity ?: 0)).coerceAtLeast(0)
+            )
+        }
+
+        Timber.d("🗑️ Basket removed: $uid")
+    }
+
+    fun showConfirmDialog() {
+        if (_uiState.value.selectedWarehouse == null) {
+            _uiState.update { it.copy(error = "請先選擇倉庫位置") }
+            return
+        }
+
+        if (_uiState.value.scannedBaskets.isEmpty()) {
+            _uiState.update { it.copy(error = "請至少掃描一個籃子") }
+            return
+        }
+
+        val hasInvalidStatus = _uiState.value.scannedBaskets.any {
+            it.basket.status != BasketStatus.IN_PRODUCTION
+        }
+
+        if (hasInvalidStatus) {
+            _uiState.update { it.copy(error = "列表中有狀態錯誤的籃子，請先移除") }
+            return
+        }
+
+        _uiState.update { it.copy(showConfirmDialog = true) }
+    }
+
+    fun dismissConfirmDialog() {
+        _uiState.update { it.copy(showConfirmDialog = false) }
+    }
+
     fun confirmReceiving() {
         viewModelScope.launch {
-            if (scannedBaskets.isEmpty()) {
-                _uiState.update { it.copy(error = "沒有掃描任何籃子") }
+            val items = _uiState.value.scannedBaskets
+            val warehouse = _uiState.value.selectedWarehouse
+
+            if (warehouse == null) {
+                _uiState.update { it.copy(error = "請先選擇倉庫位置") }
                 return@launch
             }
 
-            _uiState.update { it.copy(isLoading = true) }
+            if (items.isEmpty()) {
+                _uiState.update { it.copy(error = "請至少掃描一個籃子") }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
             val isOnline = _networkState.value is NetworkState.Connected
-            val uids = scannedBaskets.keys.toList()
+            val uids = items.map { it.basket.uid }
 
+//            warehouseRepository.receiveBaskets(uids, warehouse.id, isOnline)
             warehouseRepository.receiveBaskets(uids, isOnline)
                 .onSuccess {
-                    scannedBaskets.clear()
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             scannedBaskets = emptyList(),
                             totalQuantity = 0,
-                            successMessage = "收貨成功，共 ${uids.size} 個籃子"
+                            successMessage = "✅ 收貨成功，共 ${uids.size} 個籃子\n倉庫：${warehouse.name}\n可繼續掃描下一批"
                         )
                     }
                 }
@@ -137,7 +316,21 @@ class ReceivingViewModel @Inject constructor(
     }
 
     fun setScanMode(mode: ScanMode) {
-        _uiState.update { it.copy(scanMode = mode) }
+        viewModelScope.launch {
+            scanManager.changeScanMode(mode)
+            _uiState.update { it.copy(scanMode = mode) }
+        }
+    }
+
+    fun clearBaskets() {
+        scanManager.stopScanning()
+        _uiState.update {
+            it.copy(
+                scannedBaskets = emptyList(),
+                totalQuantity = 0
+            )
+        }
+        Timber.d("🗑️ Baskets cleared")
     }
 
     fun clearError() {
@@ -147,14 +340,29 @@ class ReceivingViewModel @Inject constructor(
     fun clearSuccess() {
         _uiState.update { it.copy(successMessage = null) }
     }
+
+    override fun onCleared() {
+        super.onCleared()
+        scanManager.stopScanning()
+    }
 }
+
+data class ScannedBasketItem(
+    val id: String,
+    val basket: Basket
+)
 
 data class ReceivingUiState(
     val isLoading: Boolean = false,
-    val isScanning: Boolean = false,
-    val scanMode: ScanMode = ScanMode.CONTINUOUS,
-    val scannedBaskets: List<Basket> = emptyList(),
+    val isValidating: Boolean = false,
+    val isLoadingWarehouses: Boolean = false,
+    val scanMode: ScanMode = ScanMode.SINGLE,
+    val warehouses: List<Warehouse> = emptyList(),
+    val selectedWarehouse: Warehouse? = null,
+    val showWarehouseDialog: Boolean = false,
+    val scannedBaskets: List<ScannedBasketItem> = emptyList(),
     val totalQuantity: Int = 0,
+    val showConfirmDialog: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null
 )

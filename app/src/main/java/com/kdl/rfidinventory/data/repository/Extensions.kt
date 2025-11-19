@@ -2,7 +2,6 @@ package com.kdl.rfidinventory.data.repository
 
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.model.*
-import kotlin.Int
 
 // BasketEntity 轉 Basket
 fun BasketEntity.toBasket(): Basket {
