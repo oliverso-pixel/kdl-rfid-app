@@ -1,4 +1,4 @@
-package com.kdl.rfidinventory.data.rfid
+package com.kdl.rfidinventory.util.rfid
 
 data class RFIDTag(
     val uid: String,

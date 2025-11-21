@@ -1,4 +1,4 @@
-package com.kdl.rfidinventory.data.barcode
+package com.kdl.rfidinventory.util.barcode
 
 data class BarcodeData(
     val content: String,

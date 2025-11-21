@@ -10,10 +10,12 @@ import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.kdl.rfidinventory.presentation.navigation.NavGraph
+import com.kdl.rfidinventory.presentation.ui.screens.splash.SplashScreen
 import com.kdl.rfidinventory.presentation.ui.theme.RFIDInventoryTheme
 import com.kdl.rfidinventory.util.KeyEventHandler
 import dagger.hilt.android.AndroidEntryPoint
@@ -32,6 +34,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         Timber.plant(Timber.DebugTree())
+        Timber.d("🚀 MainActivity onCreate")
 
         setContent {
             RFIDInventoryTheme {
@@ -39,10 +42,29 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val navController = rememberNavController()
-                    NavGraph(navController = navController)
+                    AppContent()
                 }
             }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    @Composable
+    private fun AppContent() {
+        var isInitialized by remember { mutableStateOf(false) }
+
+        if (!isInitialized) {
+            // 顯示啟動畫面
+            SplashScreen(
+                onInitComplete = {
+                    isInitialized = true
+                    Timber.d("✅ App initialization complete")
+                }
+            )
+        } else {
+            // 顯示主應用程式
+            val navController = rememberNavController()
+            NavGraph(navController = navController)
         }
     }
 

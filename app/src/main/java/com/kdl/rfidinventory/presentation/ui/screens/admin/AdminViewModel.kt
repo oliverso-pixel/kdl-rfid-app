@@ -1,19 +1,32 @@
 package com.kdl.rfidinventory.presentation.ui.screens.admin
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
+import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.repository.AdminRepository
-import com.kdl.rfidinventory.util.NetworkState
+import com.kdl.rfidinventory.data.repository.RegisterBasketResult
+import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
+enum class BasketManagementMode {
+    REGISTER,  // 登記新籃子
+    QUERY      // 查詢現有籃子
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
 @HiltViewModel
 class AdminViewModel @Inject constructor(
     private val adminRepository: AdminRepository,
-    private val pendingOperationDao: PendingOperationDao
+    private val pendingOperationDao: PendingOperationDao,
+    private val scanManager: ScanManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AdminUiState())
@@ -22,16 +35,37 @@ class AdminViewModel @Inject constructor(
     private val _networkState = MutableStateFlow<NetworkState>(NetworkState.Connected)
     val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
 
+    private val _baskets = MutableStateFlow<List<BasketEntity>>(emptyList())
+    val baskets: StateFlow<List<BasketEntity>> = _baskets.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _scanMode = MutableStateFlow(ScanMode.SINGLE)
+    val scanMode: StateFlow<ScanMode> = _scanMode.asStateFlow()
+
+    // 籃子管理模式
+    private val _basketManagementMode = MutableStateFlow(BasketManagementMode.REGISTER)
+    val basketManagementMode: StateFlow<BasketManagementMode> = _basketManagementMode.asStateFlow()
+
+    val scanState = scanManager.scanState
+
+    // 添加正在處理的 UID 集合
+    private val processingUids = mutableSetOf<String>()
+
     init {
         loadSettings()
         observePendingOperations()
+        observeLocalBaskets()
+        initializeScanManager()
+        observeScanResults()
+        observeScanErrors()
     }
 
     private fun loadSettings() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            // 載入設定
             adminRepository.getSettings()
                 .onSuccess { settings ->
                     _uiState.update {
@@ -58,6 +92,236 @@ class AdminViewModel @Inject constructor(
                 .collect { count ->
                     _uiState.update { it.copy(pendingOperationsCount = count) }
                 }
+        }
+    }
+
+    private fun observeLocalBaskets() {
+        viewModelScope.launch {
+            combine(
+                adminRepository.getAllLocalBaskets(),
+                _searchQuery
+            ) { baskets, query ->
+                if (query.isBlank()) {
+                    baskets
+                } else {
+                    baskets.filter {
+                        it.uid.contains(query, ignoreCase = true) ||
+                                it.productID?.contains(query, ignoreCase = true) == true ||
+                                it.productName?.contains(query, ignoreCase = true) == true ||
+                                it.batchId?.contains(query, ignoreCase = true) == true
+                    }
+                }
+            }.collect { filteredBaskets ->
+                _baskets.value = filteredBaskets
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun initializeScanManager() {
+        scanManager.initialize(
+            scope = viewModelScope,
+            scanMode = _scanMode,
+            canStartScan = {
+                // 只要不在註冊中，就可以開始掃描
+                !_uiState.value.isRegistering
+            }
+        )
+    }
+
+    private fun observeScanResults() {
+        viewModelScope.launch {
+            scanManager.scanResults.collect { result ->
+                when (result) {
+                    is ScanResult.RfidScanned -> {
+                        handleRfidScanned(result.tag.uid)
+                    }
+                    is ScanResult.BarcodeScanned -> {  // ⭐ 添加條碼支援
+                        handleBarcodeScanned(result.barcode)
+                    }
+                    is ScanResult.ClearListRequested -> {
+                        // 不處理清空列表
+                    }
+                }
+            }
+        }
+    }
+
+    private fun observeScanErrors() {
+        viewModelScope.launch {
+            scanManager.errors.collect { error ->
+                _uiState.update { it.copy(error = error) }
+            }
+        }
+    }
+
+    private fun handleRfidScanned(uid: String) {
+        Timber.d("🔍 RFID scanned in ${_basketManagementMode.value} mode: $uid")
+
+        when (_basketManagementMode.value) {
+            BasketManagementMode.REGISTER -> {
+                registerBasket(uid)
+            }
+            BasketManagementMode.QUERY -> {
+                queryBasket(uid)
+            }
+        }
+    }
+
+    private fun handleBarcodeScanned(barcode: String) {
+        Timber.d("🔍 Barcode scanned in ${_basketManagementMode.value} mode: $barcode")
+
+        when (_basketManagementMode.value) {
+            BasketManagementMode.REGISTER -> {
+                registerBasket(barcode)
+            }
+            BasketManagementMode.QUERY -> {
+                queryBasket(barcode)
+            }
+        }
+    }
+
+    private fun registerBasket(uid: String) {
+        // ⭐ 檢查是否正在處理這個 UID
+        if (processingUids.contains(uid)) {
+            Timber.d("⚠️ UID $uid is already being processed, skipping...")
+            return
+        }
+
+        viewModelScope.launch {
+            // ⭐ 標記為正在處理
+            processingUids.add(uid)
+            _uiState.update { it.copy(isRegistering = true) }
+
+            val isOnline = _networkState.value is NetworkState.Connected
+
+            adminRepository.registerBasket(uid, isOnline)
+                .onSuccess { result ->
+                    val message = when (result) {
+                        is RegisterBasketResult.RegisteredSuccessfully ->
+                            "✅ 籃子已成功註冊: $uid"
+                        is RegisterBasketResult.RegisteredOffline ->
+                            "📱 籃子已保存到本地（離線）: $uid"
+                        is RegisterBasketResult.AlreadyRegisteredOnServer ->
+                            "ℹ️ 籃子已在服務器註冊，已同步到本地: $uid"
+                        is RegisterBasketResult.AlreadyExistsLocally ->
+                            "⚠️ 籃子已存在於本地資料庫: $uid"
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            isRegistering = false,
+                            successMessage = message
+                        )
+                    }
+
+                    // ⭐ 延遲移除（避免重複掃描同一個籃子）
+                    delay(1000) // 1秒內不再接受同一個 UID
+                    processingUids.remove(uid)
+
+                    // 單次掃描模式：掃描成功後自動停止
+                    if (_scanMode.value == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isRegistering = false,
+                            error = "註冊失敗: ${error.message}"
+                        )
+                    }
+
+                    // ⭐ 失敗時立即移除
+                    processingUids.remove(uid)
+
+                    // 註冊失敗時，單次模式也停止掃描
+                    if (_scanMode.value == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+        }
+    }
+
+    private fun queryBasket(uid: String) {
+        Timber.d("🔍 Querying basket: $uid")
+
+        // 自動填入搜索框
+        _searchQuery.value = uid
+
+        // 提示用戶
+        _uiState.update {
+            it.copy(successMessage = "已搜索籃子: ${uid.takeLast(8)}")
+        }
+
+        // 單次模式自動停止
+        if (_scanMode.value == ScanMode.SINGLE) {
+            scanManager.stopScanning()
+        }
+    }
+
+    fun setScanMode(mode: ScanMode) {
+        viewModelScope.launch {
+            scanManager.changeScanMode(mode)
+            _scanMode.value = mode
+        }
+    }
+
+    fun setBasketManagementMode(mode: BasketManagementMode) {
+        _basketManagementMode.value = mode
+        Timber.d("📋 Basket management mode changed to: $mode")
+    }
+
+    fun toggleScan() {
+        viewModelScope.launch {
+            if (scanState.value.isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_scanMode.value)
+            }
+        }
+    }
+
+    fun searchBaskets(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun deleteBasket(uid: String) {
+        viewModelScope.launch {
+            adminRepository.deleteLocalBasket(uid)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(successMessage = "已刪除籃子: $uid")
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(error = "刪除失敗: ${error.message}")
+                    }
+                }
+        }
+    }
+
+    fun deleteBatch(uids: List<String>) {
+        viewModelScope.launch {
+            var successCount = 0
+            var failCount = 0
+
+            uids.forEach { uid ->
+                adminRepository.deleteLocalBasket(uid)
+                    .onSuccess { successCount++ }
+                    .onFailure { failCount++ }
+            }
+
+            _uiState.update {
+                it.copy(
+                    successMessage = if (failCount == 0) {
+                        "已刪除 $successCount 個籃子"
+                    } else {
+                        "刪除完成：成功 $successCount 個，失敗 $failCount 個"
+                    }
+                )
+            }
         }
     }
 
@@ -220,12 +484,21 @@ class AdminViewModel @Inject constructor(
     fun clearSuccess() {
         _uiState.update { it.copy(successMessage = null) }
     }
+
+    override fun onCleared() {
+        super.onCleared()
+        scanManager.stopScanning()
+        processingUids.clear()
+    }
 }
 
 data class AdminUiState(
     val isLoading: Boolean = false,
     val isSyncing: Boolean = false,
     val isExporting: Boolean = false,
+    val isScanning: Boolean = false,
+    val isRegistering: Boolean = false,
+    val isSearching: Boolean = false,
     val settings: AppSettings = AppSettings(),
     val pendingOperationsCount: Int = 0,
     val showClearDataDialog: Boolean = false,

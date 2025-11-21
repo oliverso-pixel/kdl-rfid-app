@@ -1,4 +1,4 @@
-package com.kdl.rfidinventory.data.barcode
+package com.kdl.rfidinventory.util.barcode
 
 interface BarcodeScanCallback {
     fun onBarcodeScanned(barcode: String)

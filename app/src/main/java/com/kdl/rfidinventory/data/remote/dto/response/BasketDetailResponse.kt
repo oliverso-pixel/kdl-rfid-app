@@ -17,32 +17,32 @@ data class BasketDetailResponse(
 )
 
 // 擴展函數
-fun BasketDetailResponse.toBasket(): Basket {
-    return Basket(
-        uid = uid,
-        product = if (productId != null && productName != null) {
-            Product(
-                id = productId,
-                name = productName,
-                maxBasketCapacity = 60
-            )
-        } else null,
-        batch = batchId?.let {
-            Batch(
-                id = it,
-                productId = productId ?: "",
-                totalQuantity = quantity,
-                remainingQuantity = quantity,
-                productionDate = productionDate ?: ""
-            )
-        },
-        quantity = quantity,
-        status = try {
-            BasketStatus.valueOf(status)
-        } catch (e: Exception) {
-            BasketStatus.UNASSIGNED
-        },
-        productionDate = productionDate,
-        lastUpdated = lastUpdated
-    )
-}
+//fun BasketDetailResponse.toBasket(): Basket {
+//    return Basket(
+//        uid = uid,
+//        product = if (productId != null && productName != null) {
+//            Product(
+//                id = productId,
+//                name = productName,
+//                maxBasketCapacity = 60
+//            )
+//        } else null,
+//        batch = batchId?.let {
+//            Batch(
+//                id = it,
+//                productId = productId ?: "",
+//                totalQuantity = quantity,
+//                remainingQuantity = quantity,
+//                productionDate = productionDate ?: ""
+//            )
+//        },
+//        quantity = quantity,
+//        status = try {
+//            BasketStatus.valueOf(status)
+//        } catch (e: Exception) {
+//            BasketStatus.UNASSIGNED
+//        },
+//        productionDate = productionDate,
+//        lastUpdated = lastUpdated
+//    )
+//}

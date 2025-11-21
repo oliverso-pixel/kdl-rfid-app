@@ -1,4 +1,4 @@
-package com.kdl.rfidinventory.data.rfid;
+package com.kdl.rfidinventory.util.rfid;
 
 import android.content.Context;
 import android.util.Log;

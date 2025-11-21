@@ -28,7 +28,7 @@ fun ConnectionStatusBar(
         modifier = modifier
     ) {
         when (networkState) {
-            is NetworkState.Offline -> {
+            is NetworkState.Disconnected -> {
                 Surface(
                     color = Color(0xFFFF9800),
                     modifier = Modifier.fillMaxWidth()
@@ -55,7 +55,7 @@ fun ConnectionStatusBar(
                     }
                 }
             }
-            is NetworkState.ConnectionFailed -> {
+            is NetworkState.Unknown -> {
                 Surface(
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.fillMaxWidth()

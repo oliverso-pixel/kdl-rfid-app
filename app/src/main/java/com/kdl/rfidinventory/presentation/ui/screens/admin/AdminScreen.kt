@@ -1,5 +1,7 @@
 package com.kdl.rfidinventory.presentation.ui.screens.admin
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -17,14 +19,18 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 
+@RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToBasketManagement: () -> Unit,
     viewModel: AdminViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
+    val baskets by viewModel.baskets.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // 錯誤提示
@@ -78,6 +84,23 @@ fun AdminScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+
+            // 籃子管理區
+            SettingsSection(title = "籃子管理") {
+                SettingItem(
+                    icon = Icons.Default.Inventory2,
+                    title = "籃子管理",
+                    subtitle = "登記、查詢、管理籃子",
+                    onClick = onNavigateToBasketManagement
+                )
+
+                SettingItem(
+                    icon = Icons.Default.Inventory,
+                    title = "本地籃子總數",
+                    subtitle = "${baskets.size} 個",
+                    onClick = null
+                )
+            }
             // 同步設定區
             SettingsSection(title = "資料同步") {
                 // 待同步記錄
@@ -132,7 +155,6 @@ fun AdminScreen(
                     )
                 }
             }
-
             // 伺服器設定區
             SettingsSection(title = "伺服器設定") {
                 SettingItem(
@@ -149,7 +171,6 @@ fun AdminScreen(
                     onClick = { viewModel.showScanTimeoutDialog() }
                 )
             }
-
             // 資料管理區
             SettingsSection(title = "資料管理") {
                 SettingItem(
@@ -168,7 +189,6 @@ fun AdminScreen(
                     textColor = MaterialTheme.colorScheme.error
                 )
             }
-
             // 系統資訊區
             SettingsSection(title = "系統資訊") {
                 InfoItem(
@@ -486,3 +506,4 @@ private fun ScanTimeoutDialog(
         }
     }
 }
+

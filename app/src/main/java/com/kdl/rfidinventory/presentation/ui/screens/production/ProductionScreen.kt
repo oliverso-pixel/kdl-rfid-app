@@ -24,19 +24,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.kdl.rfidinventory.data.model.Basket
-import com.kdl.rfidinventory.data.model.BasketStatus
-import com.kdl.rfidinventory.data.model.Batch
-import com.kdl.rfidinventory.data.model.Product
-import com.kdl.rfidinventory.data.model.ScannedBasket
+import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.presentation.ui.components.BasketCard
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ProductionStatistics
@@ -244,9 +238,12 @@ fun ProductionScreen(
                                 uid = scannedBasket.uid,
                                 product = uiState.selectedProduct,
                                 batch = uiState.selectedBatch,
+                                warehouseId = null,
                                 quantity = scannedBasket.quantity,
                                 productionDate = uiState.selectedBatch?.productionDate,
-                                status = BasketStatus.IN_PRODUCTION
+                                expireDate = null,
+                                status = BasketStatus.IN_PRODUCTION,
+                                updateBy = null
                             ),
                             scannedBasket = scannedBasket,
                             maxCapacity = uiState.selectedProduct?.maxBasketCapacity,

@@ -4,10 +4,13 @@ data class Basket (
     val uid: String,
     val product: Product?,
     val batch: Batch?,
+    val warehouseId: String?,
     val quantity: Int,
     val status: BasketStatus,
     val productionDate: String? = null,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val expireDate: String? = null,
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val updateBy: String?
 )
 
 enum class BasketStatus {

@@ -6,7 +6,6 @@ import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.ApiService
 import com.kdl.rfidinventory.data.remote.dto.request.ProductionStartRequest
-import com.kdl.rfidinventory.data.remote.dto.response.toProduct
 import kotlinx.coroutines.delay
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -27,8 +26,8 @@ class ProductionRepository @Inject constructor(
                 val orders = response.data.map {
                     ProductionOrder(
                         productId = it.productId,
-                        barcodeID = it.barcodeID,
-                        qrcodeID = it.qrcodeID,
+                        barcodeId = it.barcodeId,
+                        qrcodeId = it.qrcodeId,
                         productName = it.productName,
                         totalQuantity = it.totalQuantity,
                         imageUrl = it.imageUrl
@@ -111,20 +110,4 @@ class ProductionRepository @Inject constructor(
             Result.failure(e)
         }
     }
-
-    private fun mockProductionOrders() = listOf(
-        ProductionOrder("MP01L", barcodeID = 4890008589241, "", "大紅", 250, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-946_800x800_freshmilk_front.png?auto=webp&format=png&width=2560&height=3200&fit=cover"),
-        ProductionOrder("MP01S", barcodeID = 4893318633130, "", "細紅", 180, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-236_800x800_freshmilk_front_-20_.png?auto=webp&format=png&width=2560&height=3200&fit=cover"),
-        ProductionOrder("MP04S", barcodeID = 0, "", "特濃朱古力(小)", 180, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-236_800x800_deluxechoco_front_-20_.png?auto=webp&format=png&width=2560&height=3200&fit=cover"),
-        ProductionOrder("MP09L", barcodeID = 0, "4893318633161", "澳洲全脂牛奶(大)", 180, imageUrl = "https://homedelivery.kowloondairy.com/media/catalog/product/k/d/kd-946_800x800_australia_front.png?auto=webp&format=png&width=2560&height=3200&fit=cover")
-    )
 }
-
-data class ProductionOrder(
-    val productId: String,
-    val barcodeID: Long?,
-    val qrcodeID: String?,
-    val productName: String,
-    val totalQuantity: Int,
-    val imageUrl: String?
-)

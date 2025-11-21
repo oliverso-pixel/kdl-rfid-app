@@ -23,10 +23,13 @@ fun BasketEntity.toBasket(): Basket {
                 productionDate = productionDate ?: ""
             )
         },
+        warehouseId = warehouseId,
         quantity = quantity,
         status = status,
         productionDate = productionDate,
-        lastUpdated = lastUpdated
+        expireDate = expireDate,
+        lastUpdated = lastUpdated,
+        updateBy = updateBy
     )
 }
 
@@ -37,10 +40,13 @@ fun Basket.toEntity(): BasketEntity {
         productID = product?.id,
         productName = product?.name,
         batchId = batch?.id,
+        warehouseId = warehouseId,
         quantity = quantity,
         status = status,
         productionDate = productionDate,
-        lastUpdated = lastUpdated
+        expireDate = expireDate,
+        lastUpdated = lastUpdated,
+        updateBy = updateBy
     )
 }
 
@@ -64,6 +70,7 @@ fun com.kdl.rfidinventory.data.remote.dto.response.BasketResponse.toBasket(): Ba
                 productionDate = productionDate ?: ""
             )
         },
+        warehouseId = warehouseId,
         quantity = quantity,
         status = try {
             BasketStatus.valueOf(status)
@@ -71,7 +78,9 @@ fun com.kdl.rfidinventory.data.remote.dto.response.BasketResponse.toBasket(): Ba
             BasketStatus.UNASSIGNED
         },
         productionDate = productionDate,
-        lastUpdated = lastUpdated
+        expireDate = null,
+        lastUpdated = lastUpdated,
+        updateBy = null
     )
 }
 
@@ -79,8 +88,8 @@ fun com.kdl.rfidinventory.data.remote.dto.response.BasketResponse.toBasket(): Ba
 fun com.kdl.rfidinventory.data.remote.dto.response.ProductionOrderResponse.toProductionOrder(): ProductionOrder {
     return ProductionOrder(
         productId = productId,
-        barcodeID = barcodeID,
-        qrcodeID = qrcodeID,
+        barcodeId = barcodeId,
+        qrcodeId = qrcodeId,
         productName = productName,
         totalQuantity = totalQuantity,
         imageUrl = imageUrl

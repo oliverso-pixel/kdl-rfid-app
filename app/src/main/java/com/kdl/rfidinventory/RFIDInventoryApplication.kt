@@ -1,7 +1,7 @@
 package com.kdl.rfidinventory
 
 import android.app.Application
-import com.kdl.rfidinventory.data.rfid.RFIDManager
+import com.kdl.rfidinventory.util.rfid.RFIDManager
 import dagger.hilt.android.HiltAndroidApp
 import jakarta.inject.Inject
 import timber.log.Timber

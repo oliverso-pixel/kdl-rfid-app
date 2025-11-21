@@ -1,4 +1,4 @@
-package com.kdl.rfidinventory.data.rfid;
+package com.kdl.rfidinventory.util.rfid;
 
 /**
  * Kotlin 與 Java 之間的橋接介面

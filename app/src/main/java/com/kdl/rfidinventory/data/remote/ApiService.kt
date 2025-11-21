@@ -28,6 +28,13 @@ interface ApiService {
     @DELETE("baskets/{uid}")
     suspend fun deleteBasket(@Path("uid") uid: String): ApiResponse<Unit>
 
+    // ⭐ 籃子註冊相關 - 使用 ApiResponse
+    @GET("baskets/{uid}/check")
+    suspend fun checkBasketRegistration(@Path("uid") uid: String): ApiResponse<BasketRegistrationResponse>
+
+    @POST("baskets/register")
+    suspend fun registerBasket(@Body request: RegisterBasketRequest): ApiResponse<BasketRegistrationResponse>
+
     // 生產相關
     @GET("production/orders")
     suspend fun getProductionOrders(): ApiResponse<List<ProductionOrderResponse>>
@@ -71,3 +78,15 @@ interface ApiService {
     @PUT("admin/settings")
     suspend fun updateSettings(@Body request: UpdateSettingsRequest): ApiResponse<Unit>
 }
+
+data class BasketRegistrationResponse(
+    val isRegistered: Boolean,
+    val uid: String,
+    val registeredAt: String?,
+    val status: String?
+)
+
+data class RegisterBasketRequest(
+    val uid: String,
+    val registeredAt: Long
+)

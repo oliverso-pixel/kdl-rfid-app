@@ -75,6 +75,185 @@ fun ScanSettingsCard(
 /**
  * 掃描狀態和控制按鈕
  */
+//@Composable
+//private fun ScanStatusAndControls(
+//    isScanning: Boolean,
+//    isValidating: Boolean,
+//    scanType: ScanType,
+//    scanMode: ScanMode,
+//    onToggleScan: () -> Unit,
+//    helpText: String
+//) {
+//    when {
+//        isValidating -> {
+//            // 驗證中
+//            Row(
+//                modifier = Modifier.fillMaxWidth(),
+//                horizontalArrangement = Arrangement.spacedBy(16.dp),
+//                verticalAlignment = Alignment.CenterVertically
+//            ) {
+//                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+//                Text(
+//                    text = "驗證籃子狀態...",
+//                    style = MaterialTheme.typography.bodyLarge
+//                )
+//            }
+//        }
+//        isScanning && scanType == ScanType.BARCODE -> {
+//            // 條碼掃描中 - 顯示取消按鈕
+//            Column(
+//                modifier = Modifier.fillMaxWidth(),
+//                verticalArrangement = Arrangement.spacedBy(8.dp)
+//            ) {
+//                Row(
+//                    modifier = Modifier.fillMaxWidth(),
+//                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+//                    verticalAlignment = Alignment.CenterVertically
+//                ) {
+//                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+//                    Column(modifier = Modifier.weight(1f)) {
+//                        Text(
+//                            text = "等待條碼掃描...",
+//                            style = MaterialTheme.typography.bodyLarge
+//                        )
+//                        Text(
+//                            text = "請使用掃碼槍掃描QR/條碼",
+//                            style = MaterialTheme.typography.bodySmall,
+//                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+//                        )
+//                    }
+//                }
+//
+//                // 取消按鈕
+//                OutlinedButton(
+//                    onClick = onToggleScan,
+//                    modifier = Modifier.fillMaxWidth(),
+//                    colors = ButtonDefaults.outlinedButtonColors(
+//                        contentColor = MaterialTheme.colorScheme.error
+//                    )
+//                ) {
+//                    Icon(Icons.Default.Cancel, contentDescription = null)
+//                    Spacer(modifier = Modifier.width(8.dp))
+//                    Text("取消掃描（或再按一次實體按鍵）")
+//                }
+//            }
+//        }
+//        isScanning && scanType == ScanType.RFID -> {
+//            // RFID 掃描中
+//            Column(
+//                modifier = Modifier.fillMaxWidth(),
+//                verticalArrangement = Arrangement.spacedBy(8.dp)
+//            ) {
+//                Row(
+//                    modifier = Modifier.fillMaxWidth(),
+//                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+//                    verticalAlignment = Alignment.CenterVertically
+//                ) {
+//                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+//                    Column(modifier = Modifier.weight(1f)) {
+//                        Text(
+//                            text = "RFID 掃描中...",
+//                            style = MaterialTheme.typography.bodyLarge
+//                        )
+//                        Text(
+//                            text = when (scanMode) {
+//                                ScanMode.SINGLE -> "近距離掃描（掃到後自動停止）"
+//                                ScanMode.CONTINUOUS -> "連續掃描中"
+//                            },
+//                            style = MaterialTheme.typography.bodySmall,
+//                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+//                        )
+//                    }
+//                }
+//
+//                // 停止按鈕
+//                Button(
+//                    onClick = onToggleScan,
+//                    modifier = Modifier.fillMaxWidth(),
+//                    colors = ButtonDefaults.buttonColors(
+//                        containerColor = MaterialTheme.colorScheme.error
+//                    )
+//                ) {
+//                    Icon(Icons.Default.Stop, contentDescription = null)
+//                    Spacer(modifier = Modifier.width(8.dp))
+//                    Text("停止掃描")
+//                }
+//            }
+//        }
+//        else -> {
+//            // 未掃描狀態：顯示操作提示和掃描按鈕
+//            Column(
+//                modifier = Modifier.fillMaxWidth(),
+//                verticalArrangement = Arrangement.spacedBy(12.dp)
+//            ) {
+//                // RFID 掃描按鈕
+//                Button(
+//                    onClick = onToggleScan,
+//                    modifier = Modifier.fillMaxWidth(),
+//                    colors = ButtonDefaults.buttonColors(
+//                        containerColor = MaterialTheme.colorScheme.primary
+//                    )
+//                ) {
+//                    Icon(
+//                        imageVector = when (scanMode) {
+//                            ScanMode.SINGLE -> Icons.Default.Nfc
+//                            ScanMode.CONTINUOUS -> Icons.Default.Radar
+//                        },
+//                        contentDescription = null
+//                    )
+//                    Spacer(modifier = Modifier.width(8.dp))
+//                    Text(
+//                        when (scanMode) {
+//                            ScanMode.SINGLE -> "RFID 掃描（近距離）"
+//                            ScanMode.CONTINUOUS -> "開始連續掃描"
+//                        }
+//                    )
+//                }
+//
+//                // 模式說明卡片
+//                Card(
+//                    colors = CardDefaults.cardColors(
+//                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+//                    )
+//                ) {
+//                    Column(
+//                        modifier = Modifier
+//                            .fillMaxWidth()
+//                            .padding(12.dp),
+//                        verticalArrangement = Arrangement.spacedBy(8.dp)
+//                    ) {
+//                        Row(
+//                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+//                            verticalAlignment = Alignment.CenterVertically
+//                        ) {
+//                            Icon(
+//                                imageVector = Icons.Default.Info,
+//                                contentDescription = null,
+//                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+//                                modifier = Modifier.size(20.dp)
+//                            )
+//                            Text(
+//                                text = when (scanMode) {
+//                                    ScanMode.SINGLE -> "單次掃描模式"
+//                                    ScanMode.CONTINUOUS -> "連續掃描模式"
+//                                },
+//                                style = MaterialTheme.typography.labelMedium,
+//                                color = MaterialTheme.colorScheme.onSurfaceVariant
+//                            )
+//                        }
+//
+//                        Text(
+//                            text = helpText,
+//                            style = MaterialTheme.typography.bodySmall,
+//                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+//                        )
+//                    }
+//                }
+//            }
+//        }
+//    }
+//}
+
 @Composable
 private fun ScanStatusAndControls(
     isScanning: Boolean,
@@ -86,7 +265,7 @@ private fun ScanStatusAndControls(
 ) {
     when {
         isValidating -> {
-            // 驗證中
+            // ⭐ 驗證中
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),

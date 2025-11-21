@@ -2,28 +2,38 @@ package com.kdl.rfidinventory.presentation.ui.screens.warehouse.receiving
 
 import android.os.Build
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.repository.Warehouse
 import com.kdl.rfidinventory.presentation.ui.components.BasketCard
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ReceivingStatistics
+import com.kdl.rfidinventory.presentation.ui.components.ScanModeSelector
 import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
+import com.kdl.rfidinventory.presentation.ui.theme.BasketStatusColors
+import com.kdl.rfidinventory.presentation.ui.theme.ScanModeColors
 import com.kdl.rfidinventory.util.ScanMode
 import com.kdl.rfidinventory.util.ScanType
-
+import timber.log.Timber
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)

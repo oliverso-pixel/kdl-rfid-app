@@ -3,8 +3,8 @@ package com.kdl.rfidinventory.data.remote.dto.response
 data class ProductionOrderResponse(
     val id: String,
     val productId: String,
-    val barcodeID: Long?,
-    val qrcodeID: String?,
+    val barcodeId: Long?,
+    val qrcodeId: String?,
     val productName: String,
     val totalQuantity: Int,
     val imageUrl: String? = null,

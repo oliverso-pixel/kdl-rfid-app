@@ -1,4 +1,4 @@
-package com.kdl.rfidinventory.data.rfid
+package com.kdl.rfidinventory.util.rfid
 
 sealed class ScanResult {
     data class RFIDScan(val tag: RFIDTag) : ScanResult()

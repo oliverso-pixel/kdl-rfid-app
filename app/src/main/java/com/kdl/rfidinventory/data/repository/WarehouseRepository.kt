@@ -254,10 +254,13 @@ class WarehouseRepository @Inject constructor(
                     productionDate = "2025-11-18"
                 )
             } else null,
+            warehouseId = null,
             quantity = if (status != BasketStatus.UNASSIGNED) 60 else 0,
             status = status,
             productionDate = if (status != BasketStatus.UNASSIGNED) "2025-11-18" else null,
-            lastUpdated = System.currentTimeMillis()
+            expireDate = null,
+            lastUpdated = System.currentTimeMillis(),
+            updateBy = null
         )
     }
 
@@ -266,12 +269,6 @@ class WarehouseRepository @Inject constructor(
         Warehouse(id = "WH-002", name = "1F-A", address = "", isActive = true),
         Warehouse(id = "WH-003", name = "1F-B", address = "", isActive = true),
         Warehouse(id = "WH-004", name = "3F", address = "", isActive = false)
-    )
-
-    private fun mockRoutes() = listOf(
-        Route("R1", "路線 A", "倉庫 A", "true"),
-        Route("R2", "路線 B", "倉庫 B", "true"),
-        Route("R3", "路線 C", "倉庫 C", "false")
     )
 }
 

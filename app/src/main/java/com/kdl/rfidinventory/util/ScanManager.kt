@@ -2,8 +2,8 @@ package com.kdl.rfidinventory.util
 
 import android.os.Build
 import androidx.annotation.RequiresApi
-import com.kdl.rfidinventory.data.rfid.RFIDManager
-import com.kdl.rfidinventory.data.rfid.RFIDTag
+import com.kdl.rfidinventory.util.rfid.RFIDManager
+import com.kdl.rfidinventory.util.rfid.RFIDTag
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*

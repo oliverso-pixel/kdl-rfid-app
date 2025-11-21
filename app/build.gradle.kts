@@ -46,10 +46,16 @@ android {
 
 dependencies {
     implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.ui.graphics)
+
+    // Splash Screen API
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     // RFID SDK
     implementation(files("libs/USDKLibrary-v1.0.0909.aar"))
-    implementation(libs.androidx.compose.ui.graphics)
+//    implementation(files("libs/URFIDLibrary-v2.5.0218.aar"))
+//    implementation(files("libs/jxl.jar"))
+//    implementation(files("libs/platform_sdk_v3.1.221124.jar"))
 
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")

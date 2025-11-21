@@ -7,7 +7,6 @@ import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.ApiService
 import com.kdl.rfidinventory.data.remote.dto.request.ScanRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
-import com.kdl.rfidinventory.data.remote.dto.response.toBasket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -24,40 +23,40 @@ class BasketRepository @Inject constructor(
     private val pendingOperationDao: PendingOperationDao
 ) {
 
-    suspend fun scanBasket(uid: String, isOnline: Boolean): Result<Basket> = withContext(Dispatchers.IO) {
-        try {
-            if (isOnline) {
-                val response = apiService.scanBasket(ScanRequest(uid))
-                if (response.success && response.data != null) {
-                    val basket = response.data.toBasket()
-                    basketDao.insertBasket(basket.toEntity())
-                    Result.success(basket)
-                } else {
-                    Result.failure(Exception(response.message ?: "掃描失敗"))
-                }
-            } else {
-                val entity = basketDao.getBasketByUid(uid)
-                if (entity != null) {
-                    Result.success(entity.toBasket())
-                } else {
-                    delay(300)
-                    val newBasket = Basket(
-                        uid = uid,
-                        product = null,
-                        batch = null,
-                        quantity = 0,
-                        status = BasketStatus.UNASSIGNED,
-                        productionDate = null,
-                        lastUpdated = System.currentTimeMillis()
-                    )
-                    basketDao.insertBasket(newBasket.toEntity())
-                    Result.success(newBasket)
-                }
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+//    suspend fun scanBasket(uid: String, isOnline: Boolean): Result<Basket> = withContext(Dispatchers.IO) {
+//        try {
+//            if (isOnline) {
+//                val response = apiService.scanBasket(ScanRequest(uid))
+//                if (response.success && response.data != null) {
+//                    val basket = response.data.toBasket()
+//                    basketDao.insertBasket(basket.toEntity())
+//                    Result.success(basket)
+//                } else {
+//                    Result.failure(Exception(response.message ?: "掃描失敗"))
+//                }
+//            } else {
+//                val entity = basketDao.getBasketByUid(uid)
+//                if (entity != null) {
+//                    Result.success(entity.toBasket())
+//                } else {
+//                    delay(300)
+//                    val newBasket = Basket(
+//                        uid = uid,
+//                        product = null,
+//                        batch = null,
+//                        quantity = 0,
+//                        status = BasketStatus.UNASSIGNED,
+//                        productionDate = null,
+//                        lastUpdated = System.currentTimeMillis()
+//                    )
+//                    basketDao.insertBasket(newBasket.toEntity())
+//                    Result.success(newBasket)
+//                }
+//            }
+//        } catch (e: Exception) {
+//            Result.failure(e)
+//        }
+//    }
 
     suspend fun getBasketByUid(uid: String): Result<Basket> = withContext(Dispatchers.IO) {
         try {

@@ -11,8 +11,11 @@ data class BasketEntity(
     val productID: String?,
     val productName: String?,
     val batchId: String?,
+    val warehouseId: String?,
     val quantity: Int,
     val status: BasketStatus,
     val productionDate: String?,
-    val lastUpdated: Long
+    val expireDate: String?,
+    val lastUpdated: Long,
+    val updateBy: String?
 )

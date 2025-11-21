@@ -27,7 +27,7 @@ class MainViewModel @Inject constructor(
             pendingOperationDao.getPendingCount()
                 .collect { count ->
                     if (count > 0) {
-                        _networkState.value = NetworkState.Offline(count)
+                        _networkState.value = NetworkState.Disconnected(count)
                     }
                 }
         }

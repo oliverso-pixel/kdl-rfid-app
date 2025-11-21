@@ -5,8 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.repository.SamplingRepository
-import com.kdl.rfidinventory.data.rfid.RFIDManager
-import com.kdl.rfidinventory.data.rfid.RFIDTag
+import com.kdl.rfidinventory.util.rfid.RFIDManager
+import com.kdl.rfidinventory.util.rfid.RFIDTag
 import com.kdl.rfidinventory.util.NetworkState
 import com.kdl.rfidinventory.util.ScanMode
 import dagger.hilt.android.lifecycle.HiltViewModel

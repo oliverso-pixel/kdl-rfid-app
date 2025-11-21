@@ -1,101 +1,20 @@
-package com.kdl.rfidinventory.data.rfid
+package com.kdl.rfidinventory.util.rfid
 
 import android.content.Context
-import android.os.Binder
-import android.os.IBinder
-import com.kdl.rfidinventory.data.barcode.BarcodeScanManager
+import com.kdl.rfidinventory.util.barcode.BarcodeScanManager
 import com.kdl.rfidinventory.util.ScanMode
 import com.kdl.rfidinventory.util.SoundTool
 import com.ubx.usdk.USDKManager
-import com.ubx.usdk.rfid.RfidManager
-import com.ubx.usdk.rfid.aidl.IRfidCallback
-import com.ubx.usdk.rfid.aidl.RfidDate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.random.Random
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
-
 import com.ubx.usdk.rfid.RfidManager as UsdkRfidManager
-
-/**
- * RFID 管理器 - Mock 版本
- */
-//@Singleton
-//class RFIDManager @Inject constructor() {
-//
-//    private var isScanning = false
-//    private val scannedUids = mutableSetOf<String>()
-//
-//    fun startScan(mode: ScanMode): Flow<RFIDTag> = flow {
-//        isScanning = true
-//        scannedUids.clear()
-//
-//        when (mode) {
-//            ScanMode.SINGLE -> {
-//                // 單次掃描：延遲 1-2 秒模擬掃描
-//                delay(Random.nextLong(1000, 2000))
-//                emit(generateMockTag())
-//                isScanning = false
-//            }
-//            ScanMode.CONTINUOUS -> {
-//                // 連續掃描：每 1.5-3 秒返回一個新標籤
-//                while (isScanning) {
-//                    delay(Random.nextLong(1500, 3000))
-//                    if (isScanning) {
-//                        emit(generateMockTag())
-//                    }
-//                }
-//            }
-//        }
-//    }
-//
-//    fun stopScan() {
-//        isScanning = false
-//    }
-//
-//    suspend fun writeUid(newUid: String): Result<Unit> {
-//        delay(500)
-//        return Result.success(Unit)
-//    }
-//
-//    suspend fun writeUserData(uid: String, data: ByteArray): Result<Unit> {
-//        delay(500)
-//        return Result.success(Unit)
-//    }
-//
-//    private fun generateMockTag(): RFIDTag {
-//        // 生成唯一的 UID
-//        val uid = generateUniqueUid()
-//        return RFIDTag(
-//            uid = uid,
-//            rssi = Random.nextInt(-80, -30)
-//        )
-//    }
-//
-//    private fun generateUniqueUid(): String {
-//        val prefix = "E28011702100"
-//        var uid: String
-//
-//        // 確保生成的 UID 是唯一的
-//        do {
-//            val randomPart = (1..12).map {
-//                "0123456789ABCDEF"[Random.nextInt(16)]
-//            }.joinToString("")
-//            uid = prefix + randomPart
-//        } while (scannedUids.contains(uid))
-//
-//        scannedUids.add(uid)
-//        return uid
-//    }
-//}
 
 /**
  * RFID 管理器 - 真實硬體 SDK (USDK) 版本
@@ -292,6 +211,17 @@ class RFIDManager @Inject constructor(
         } catch (e: Exception) {
             Timber.e(e, "Error setting power")
             Result.failure(e)
+        }
+    }
+
+    fun isConnected(): Boolean {
+        return try {
+            // 根據你的實際 RFID SDK 實作
+            // 例如：rfidDevice?.isConnected() ?: false
+            true // 暫時返回 true，請根據實際情況修改
+        } catch (e: Exception) {
+            Timber.e(e, "Error checking RFID connection")
+            false
         }
     }
 

@@ -6,7 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.repository.ProductionRepository
-import com.kdl.rfidinventory.data.rfid.RFIDTag
+import com.kdl.rfidinventory.util.rfid.RFIDTag
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -99,8 +99,8 @@ class ProductionViewModel @Inject constructor(
                     val products = orders.map { order ->
                         Product(
                             id = order.productId,
-                            barcodeId = order.barcodeID,
-                            qrcodeId = order.qrcodeID,
+                            barcodeId = order.barcodeId,
+                            qrcodeId = order.qrcodeId,
                             name = order.productName,
                             maxBasketCapacity = 60,
                             imageUrl = order.imageUrl
