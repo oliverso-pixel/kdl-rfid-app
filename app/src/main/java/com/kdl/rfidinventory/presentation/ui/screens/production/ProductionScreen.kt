@@ -513,9 +513,40 @@ private fun ProductSelectionDialog(
     val focusRequester = remember { FocusRequester() }
     var isDialogReady by remember { mutableStateOf(false) }
 
-    // ⭐ 確保對話框完全加載後才請求焦點
+    // 監聽 TextField 輸入的條碼數據
+    var previousQuery by remember { mutableStateOf("") }
+
+    // 監聽 searchQuery 變化，檢測條碼掃描
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isNotEmpty() && searchQuery != previousQuery) {
+            val queryLength = searchQuery.length
+            val previousLength = previousQuery.length
+
+            //  檢測快速輸入（條碼掃描的特徵）
+            if (queryLength - previousLength >= 5) {  // 一次性輸入 5+ 個字符
+                Timber.d("📦 Barcode detected via TextField: $searchQuery")
+
+                // 自動搜索並選擇
+                kotlinx.coroutines.delay(100)
+                val filteredProducts = products.filter { product ->
+                    product.id.lowercase().contains(searchQuery.lowercase()) ||
+                            product.name.lowercase().contains(searchQuery.lowercase()) ||
+                            (product.barcodeId?.toString()?.contains(searchQuery) == true) ||
+                            (product.qrcodeId?.lowercase()?.contains(searchQuery.lowercase()) == true)
+                }
+
+                if (filteredProducts.size == 1) {
+                    Timber.d("🎯 Auto-selecting product: ${filteredProducts.first().name}")
+                    onProductSelected(filteredProducts.first())
+                }
+            }
+
+            previousQuery = searchQuery
+        }
+    }
+
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(100) // 短暫延遲確保 UI 完全渲染
+        kotlinx.coroutines.delay(100)
         try {
             focusRequester.requestFocus()
             isDialogReady = true
@@ -525,14 +556,6 @@ private fun ProductSelectionDialog(
         }
     }
 
-    // ⭐ 監聽搜索查詢變化，用於調試
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.isNotEmpty()) {
-            Timber.d("🔍 Search query updated: $searchQuery")
-        }
-    }
-
-    // 過濾產品列表
     val filteredProducts = remember(products, searchQuery) {
         if (searchQuery.isBlank()) {
             products
@@ -547,7 +570,6 @@ private fun ProductSelectionDialog(
         }
     }
 
-    // ⭐ 監聽 Enter 鍵自動選擇
     val onEnterPressed = {
         if (filteredProducts.size == 1) {
             Timber.d("⌨️ Enter pressed, selecting product: ${filteredProducts.first().name}")
@@ -572,7 +594,6 @@ private fun ProductSelectionDialog(
                 ) {
                     Text("選擇產品")
 
-                    // ⭐ 掃碼槍提示圖標（帶狀態指示）
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -599,11 +620,11 @@ private fun ProductSelectionDialog(
                     }
                 }
 
-                // ⭐ 搜索框
+                // ⭐ 搜索框 - 關鍵修改
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { newValue ->
-                        Timber.d("📝 Search query changed: '$newValue'")
+                        Timber.d("📝 Search query changed: '$newValue' (prev: '$previousQuery')")
                         onSearchQueryChange(newValue)
                     },
                     modifier = Modifier
@@ -639,13 +660,14 @@ private fun ProductSelectionDialog(
                             IconButton(onClick = {
                                 Timber.d("🗑️ Clearing search query")
                                 onSearchQueryChange("")
+                                previousQuery = ""  // ⭐ 重置 previousQuery
                             }) {
                                 Icon(Icons.Default.Clear, contentDescription = "清除")
                             }
                         }
                     },
                     singleLine = true,
-                    enabled = isDialogReady, // ⭐ 只有準備好後才啟用
+                    enabled = isDialogReady,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline,

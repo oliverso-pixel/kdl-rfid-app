@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.view.KeyEvent
 import androidx.core.content.ContextCompat
 import com.kdl.rfidinventory.util.SoundTool
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -15,10 +16,6 @@ import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * 條碼掃描管理器
- * 通過 BroadcastReceiver 接收系統條碼掃描事件
- */
 @Singleton
 class BarcodeScanManager @Inject constructor(
     @ApplicationContext private val context: Context
@@ -26,17 +23,23 @@ class BarcodeScanManager @Inject constructor(
     private var isInitialized = false
     private var scanReceiver: BarcodeScanReceiver? = null
 
+    // ⭐ KeyEvent 模式相關
+    private val keyEventBuffer = StringBuilder()
+    private var lastKeyEventTime = 0L
+    private var keyEventCallback: ((String) -> Unit)? = null
+
     companion object {
-        // 常見的條碼掃描廣播 Action（根據設備廠商可能不同）
         private const val ACTION_BARCODE_SCAN = "com.android.server.scannerservice.broadcast"
         private const val ACTION_BARCODE_DECODED = "android.intent.ACTION_DECODE_DATA"
         private const val ACTION_SCANNER_RESULT = "nlscan.action.SCANNER_RESULT"
 
-        // 數據字段（根據設備廠商可能不同）
         private const val EXTRA_BARCODE_DATA = "barcode"
         private const val EXTRA_BARCODE_STRING = "barocode_string"
         private const val EXTRA_SCAN_RESULT = "SCAN_BARCODE1"
         private const val EXTRA_DECODE_DATA = "barcode_string"
+
+        // ⭐ KeyEvent 超時時間（毫秒）
+        private const val KEY_EVENT_TIMEOUT_MS = 100L
     }
 
     init {
@@ -54,9 +57,90 @@ class BarcodeScanManager @Inject constructor(
     }
 
     /**
-     * 開始條碼掃描
-     * 返回一個 Flow，每次掃描到條碼時發送數據
+     * ⭐ 處理 KeyEvent 條碼掃描
+     * @return true 表示事件已處理
      */
+    fun handleKeyEvent(keyCode: Int, event: KeyEvent): Boolean {
+        // ⭐ 只處理 ACTION_DOWN
+        if (event.action != KeyEvent.ACTION_DOWN) {
+            return false
+        }
+
+        // ⭐ 如果沒有激活的掃描回調，不處理
+        if (keyEventCallback == null) {
+            return false
+        }
+
+        val currentTime = System.currentTimeMillis()
+
+        // ⭐ 檢查是否超時（開始新的掃描）
+        if (currentTime - lastKeyEventTime > KEY_EVENT_TIMEOUT_MS) {
+            if (keyEventBuffer.isNotEmpty()) {
+                Timber.v("⏱️ Scan timeout, clearing buffer: ${keyEventBuffer}")
+            }
+            keyEventBuffer.clear()
+        }
+        lastKeyEventTime = currentTime
+
+        return when (keyCode) {
+            KeyEvent.KEYCODE_ENTER -> {
+                // ⭐ Enter 鍵表示掃描結束
+                if (keyEventBuffer.isNotEmpty()) {
+                    val barcode = keyEventBuffer.toString()
+                    Timber.i("📱 Barcode scanned via KeyEvent: $barcode")
+                    keyEventBuffer.clear()
+
+                    // 觸發回調
+                    keyEventCallback?.invoke(barcode)
+                    SoundTool.getInstance(context)?.playBeep(1)
+                    true  // ⭐ 返回 true，表示事件已處理
+                } else {
+                    Timber.v("⚠️ ENTER pressed but buffer is empty")
+                    false
+                }
+            }
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> {
+                // 數字鍵
+                val digit = (keyCode - KeyEvent.KEYCODE_0).toString()
+                keyEventBuffer.append(digit)
+                Timber.v("📝 Barcode buffer: ${keyEventBuffer}")
+                true  // ⭐ 返回 true
+            }
+            in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> {
+                // 字母鍵
+                val char = ('A' + (keyCode - KeyEvent.KEYCODE_A))
+                keyEventBuffer.append(char)
+                Timber.v("📝 Barcode buffer: ${keyEventBuffer}")
+                true  // ⭐ 返回 true
+            }
+            KeyEvent.KEYCODE_MINUS -> {
+                keyEventBuffer.append('-')
+                Timber.v("📝 Barcode buffer: ${keyEventBuffer}")
+                true
+            }
+            KeyEvent.KEYCODE_PERIOD -> {
+                keyEventBuffer.append('.')
+                Timber.v("📝 Barcode buffer: ${keyEventBuffer}")
+                true
+            }
+            KeyEvent.KEYCODE_SPACE -> {
+                keyEventBuffer.append(' ')
+                Timber.v("📝 Barcode buffer: ${keyEventBuffer}")
+                true
+            }
+            // ⭐ 新增：處理 keyCode=0 (某些掃描器可能發送)
+            0 -> {
+                Timber.v("⚠️ Received keyCode=0, ignoring")
+                false
+            }
+            else -> {
+                // ⭐ 其他按鍵不處理
+                Timber.v("⏭️ Unhandled keyCode in barcode scan: $keyCode")
+                false
+            }
+        }
+    }
+
     fun startScan(): Flow<BarcodeData> = callbackFlow {
         if (!isInitialized) {
             Timber.e("BarcodeScanManager not initialized")
@@ -64,10 +148,21 @@ class BarcodeScanManager @Inject constructor(
             return@callbackFlow
         }
 
-        Timber.d("🔍 Starting barcode scan...")
+        Timber.d("🔍 Starting barcode scan (Broadcast + KeyEvent mode)...")
 
+        // ⭐ 設置 KeyEvent 回調
+        keyEventCallback = { barcode ->
+            Timber.d("📦 Barcode received via KeyEvent: $barcode")
+            val barcodeData = BarcodeData(
+                content = barcode,
+                format = detectBarcodeFormat(barcode)
+            )
+            trySend(barcodeData).isSuccess
+        }
+
+        // ⭐ 同時註冊 BroadcastReceiver（備用）
         scanReceiver = BarcodeScanReceiver { barcodeData ->
-            Timber.d("📱 Barcode received: ${barcodeData.content}")
+            Timber.d("📡 Barcode received via Broadcast: ${barcodeData.content}")
             trySend(barcodeData).isSuccess
             SoundTool.getInstance(context)?.playBeep(1)
         }
@@ -93,10 +188,9 @@ class BarcodeScanManager @Inject constructor(
                     ContextCompat.RECEIVER_NOT_EXPORTED
                 )
             }
-            Timber.i("✅ Barcode scan receiver registered")
+            Timber.i("✅ Barcode scan receiver registered (Broadcast + KeyEvent)")
         } catch (e: Exception) {
             Timber.e(e, "Failed to register barcode receiver")
-            close(e)
         }
 
         awaitClose {
@@ -107,11 +201,17 @@ class BarcodeScanManager @Inject constructor(
 
     fun stopScan() {
         try {
+            // ⭐ 清除 KeyEvent 回調
+            keyEventCallback = null
+            keyEventBuffer.clear()
+            lastKeyEventTime = 0L
+
+            // 取消註冊 BroadcastReceiver
             scanReceiver?.let {
                 context.unregisterReceiver(it)
                 scanReceiver = null
-                Timber.d("🛑 Barcode scan receiver unregistered")
             }
+            Timber.d("🛑 Barcode scan stopped")
         } catch (e: Exception) {
             Timber.e(e, "Error stopping barcode scan")
         }
@@ -122,6 +222,16 @@ class BarcodeScanManager @Inject constructor(
         stopScan()
         isInitialized = false
         Timber.i("✅ BarcodeScanManager resources released")
+    }
+
+    private fun detectBarcodeFormat(barcode: String): BarcodeFormat {
+        return when {
+            barcode.length == 13 && barcode.all { it.isDigit() } -> BarcodeFormat.EAN_13
+            barcode.length == 8 && barcode.all { it.isDigit() } -> BarcodeFormat.EAN_8
+            barcode.length == 12 && barcode.all { it.isDigit() } -> BarcodeFormat.UPC_A
+            barcode.startsWith("http") || barcode.contains("://") -> BarcodeFormat.QR_CODE
+            else -> BarcodeFormat.UNKNOWN
+        }
     }
 
     private inner class BarcodeScanReceiver(
@@ -147,7 +257,6 @@ class BarcodeScanManager @Inject constructor(
             }
         }
 
-
         private fun extractBarcodeFromIntent(intent: Intent): String? {
             val possibleKeys = listOf(
                 EXTRA_BARCODE_DATA,
@@ -166,7 +275,6 @@ class BarcodeScanManager @Inject constructor(
                 }
             }
 
-            // 尝试从 byte array 提取
             try {
                 val bytes = intent.getByteArrayExtra("data")
                 if (bytes != null && bytes.isNotEmpty()) {
@@ -181,22 +289,6 @@ class BarcodeScanManager @Inject constructor(
             return null
         }
 
-        /**
-         * 檢測條碼格式
-         */
-        private fun detectBarcodeFormat(barcode: String): BarcodeFormat {
-            return when {
-                barcode.length == 13 && barcode.all { it.isDigit() } -> BarcodeFormat.EAN_13
-                barcode.length == 8 && barcode.all { it.isDigit() } -> BarcodeFormat.EAN_8
-                barcode.length == 12 && barcode.all { it.isDigit() } -> BarcodeFormat.UPC_A
-                barcode.startsWith("http") || barcode.contains("://") -> BarcodeFormat.QR_CODE
-                else -> BarcodeFormat.UNKNOWN
-            }
-        }
-
-        /**
-         * 記錄 Intent 的所有 extras（調試用）
-         */
         private fun logIntentExtras(intent: Intent) {
             val extras = intent.extras
             if (extras != null) {

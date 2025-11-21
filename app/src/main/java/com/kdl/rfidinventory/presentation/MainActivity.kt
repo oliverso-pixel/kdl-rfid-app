@@ -18,6 +18,7 @@ import com.kdl.rfidinventory.presentation.navigation.NavGraph
 import com.kdl.rfidinventory.presentation.ui.screens.splash.SplashScreen
 import com.kdl.rfidinventory.presentation.ui.theme.RFIDInventoryTheme
 import com.kdl.rfidinventory.util.KeyEventHandler
+import com.kdl.rfidinventory.util.barcode.BarcodeScanManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -28,6 +29,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var keyEventHandler: KeyEventHandler
+
+    @Inject
+    lateinit var barcodeScanManager: BarcodeScanManager
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,14 +74,21 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        Timber.d("🎯 Activity dispatchKeyEvent: keyCode=${event.keyCode}, action=${event.action}")
+        val keyCode = event.keyCode
+        Timber.d("🎯 Activity dispatchKeyEvent: keyCode=$keyCode, action=${event.action}")
 
-        // 使用協程處理按鍵事件
+        // ⭐ 優先處理條碼 KeyEvent（必須在 KeyEventHandler 之前）
+        if (barcodeScanManager.handleKeyEvent(keyCode, event)) {
+            Timber.d("✅ Key event handled by BarcodeScanManager")
+            return true  // ⭐ 返回 true，防止事件繼續傳遞
+        }
+
+        // 處理掃描觸發鍵
         lifecycleScope.launch {
-            val handled = keyEventHandler.handleKeyEvent(event.keyCode, event)
-            if (handled) {
+            if (keyEventHandler.handleKeyEvent(keyCode, event)) {
                 Timber.d("✅ Key event handled by KeyEventHandler")
-                return@launch
+            } else {
+                Timber.v("⏭️ Key event not handled")
             }
         }
 
@@ -87,6 +98,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         keyEventHandler.reset()
+        barcodeScanManager.release()
         Timber.d("🛑 MainActivity destroyed")
     }
 }
