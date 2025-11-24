@@ -24,9 +24,9 @@ enum class BasketManagementMode {
 @RequiresApi(Build.VERSION_CODES.O)
 @HiltViewModel
 class AdminViewModel @Inject constructor(
+    private val scanManager: ScanManager,
     private val adminRepository: AdminRepository,
     private val pendingOperationDao: PendingOperationDao,
-    private val scanManager: ScanManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AdminUiState())
@@ -54,6 +54,7 @@ class AdminViewModel @Inject constructor(
     private val processingUids = mutableSetOf<String>()
 
     init {
+        Timber.d("🎯 AdminViewModel init called (instance: ${this.hashCode()})")
         loadSettings()
         observePendingOperations()
         observeLocalBaskets()
@@ -119,29 +120,28 @@ class AdminViewModel @Inject constructor(
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun initializeScanManager() {
+        Timber.d("🎯 Initializing ScanManager (ViewModel instance: ${this.hashCode()}, ScanManager instance: ${scanManager.hashCode()})")
+
         scanManager.initialize(
             scope = viewModelScope,
             scanMode = _scanMode,
-            canStartScan = {
-                // 只要不在註冊中，就可以開始掃描
-                !_uiState.value.isRegistering
-            }
+            canStartScan = { true }
         )
+
+        Timber.d("✅ ScanManager initialized (ViewModel instance: ${this.hashCode()})")
     }
 
     private fun observeScanResults() {
         viewModelScope.launch {
             scanManager.scanResults.collect { result ->
                 when (result) {
+                    is ScanResult.BarcodeScanned -> {
+                        handleScannedBarcode(result.barcode)
+                    }
                     is ScanResult.RfidScanned -> {
-                        handleRfidScanned(result.tag.uid)
+                        handleScannedRfidTag(result.tag.uid)
                     }
-                    is ScanResult.BarcodeScanned -> {  // ⭐ 添加條碼支援
-                        handleBarcodeScanned(result.barcode)
-                    }
-                    is ScanResult.ClearListRequested -> {
-                        // 不處理清空列表
-                    }
+                    is ScanResult.ClearListRequested -> {}
                 }
             }
         }
@@ -155,20 +155,32 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    private fun handleRfidScanned(uid: String) {
-        Timber.d("🔍 RFID scanned in ${_basketManagementMode.value} mode: $uid")
+    fun setScanMode(mode: ScanMode) {
+        viewModelScope.launch {
+            Timber.d("🔄 setScanMode called: $mode (current: ${_scanMode.value})")
 
-        when (_basketManagementMode.value) {
-            BasketManagementMode.REGISTER -> {
-                registerBasket(uid)
+            // 先停止掃描
+            if (scanManager.scanState.value.isScanning) {
+                Timber.d("⏹️ Stopping scan before mode change")
+                scanManager.stopScanning()
+                delay(100)
             }
-            BasketManagementMode.QUERY -> {
-                queryBasket(uid)
-            }
+
+            // 更新本地狀態
+            _scanMode.value = mode
+            Timber.d("✅ _scanMode updated to: ${_scanMode.value}")
+
+            // 延遲確保 StateFlow 更新
+            delay(50)
+
+            // 通知 ScanManager
+            scanManager.changeScanMode(mode)
+
+            Timber.d("🔄 Scan mode change complete")
         }
     }
 
-    private fun handleBarcodeScanned(barcode: String) {
+    private fun handleScannedBarcode(barcode: String) {
         Timber.d("🔍 Barcode scanned in ${_basketManagementMode.value} mode: $barcode")
 
         when (_basketManagementMode.value) {
@@ -181,15 +193,38 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    private fun handleScannedRfidTag(uid: String) {
+        Timber.d("🔍 RFID scanned in ${_basketManagementMode.value} mode: $uid")
+
+        when (_basketManagementMode.value) {
+            BasketManagementMode.REGISTER -> {
+                registerBasket(uid)
+            }
+            BasketManagementMode.QUERY -> {
+                queryBasket(uid)
+            }
+        }
+    }
+
+    fun toggleScan() {
+        viewModelScope.launch {
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_scanMode.value)
+            }
+        }
+    }
+
     private fun registerBasket(uid: String) {
-        // ⭐ 檢查是否正在處理這個 UID
+        // 檢查是否正在處理這個 UID
         if (processingUids.contains(uid)) {
             Timber.d("⚠️ UID $uid is already being processed, skipping...")
             return
         }
 
         viewModelScope.launch {
-            // ⭐ 標記為正在處理
+            // 標記為正在處理
             processingUids.add(uid)
             _uiState.update { it.copy(isRegistering = true) }
 
@@ -215,7 +250,7 @@ class AdminViewModel @Inject constructor(
                         )
                     }
 
-                    // ⭐ 延遲移除（避免重複掃描同一個籃子）
+                    // 延遲移除（避免重複掃描同一個籃子）
                     delay(1000) // 1秒內不再接受同一個 UID
                     processingUids.remove(uid)
 
@@ -232,7 +267,7 @@ class AdminViewModel @Inject constructor(
                         )
                     }
 
-                    // ⭐ 失敗時立即移除
+                    // 失敗時立即移除
                     processingUids.remove(uid)
 
                     // 註冊失敗時，單次模式也停止掃描
@@ -260,26 +295,9 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    fun setScanMode(mode: ScanMode) {
-        viewModelScope.launch {
-            scanManager.changeScanMode(mode)
-            _scanMode.value = mode
-        }
-    }
-
     fun setBasketManagementMode(mode: BasketManagementMode) {
         _basketManagementMode.value = mode
         Timber.d("📋 Basket management mode changed to: $mode")
-    }
-
-    fun toggleScan() {
-        viewModelScope.launch {
-            if (scanState.value.isScanning) {
-                scanManager.stopScanning()
-            } else {
-                scanManager.startRfidScan(_scanMode.value)
-            }
-        }
     }
 
     fun searchBaskets(query: String) {
@@ -487,7 +505,8 @@ class AdminViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        scanManager.stopScanning()
+        Timber.d("🧹 AdminViewModel onCleared (instance: ${this.hashCode()})")
+        scanManager.cleanup()
         processingUids.clear()
     }
 }

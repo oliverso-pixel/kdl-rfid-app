@@ -39,11 +39,10 @@ class ReceivingViewModel @Inject constructor(
         observeScanErrors()
     }
 
-    // ⭐ 載入倉庫列表
+    // 載入倉庫列表
     private fun loadWarehouses() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingWarehouses = true) }
-
             warehouseRepository.getWarehouses()
                 .onSuccess { warehouses ->
                     _uiState.update {
@@ -65,26 +64,6 @@ class ReceivingViewModel @Inject constructor(
         }
     }
 
-    // ⭐ 選擇倉庫
-    fun selectWarehouse(warehouse: Warehouse) {
-        _uiState.update {
-            it.copy(
-                selectedWarehouse = warehouse,
-                showWarehouseDialog = false
-            )
-        }
-        Timber.d("📍 倉庫已選擇: ${warehouse.name} (${warehouse.id})")
-    }
-
-    // ⭐ 顯示/隱藏倉庫選擇對話框
-    fun showWarehouseDialog() {
-        _uiState.update { it.copy(showWarehouseDialog = true) }
-    }
-
-    fun dismissWarehouseDialog() {
-        _uiState.update { it.copy(showWarehouseDialog = false) }
-    }
-
     @RequiresApi(Build.VERSION_CODES.O)
     private fun initializeScanManager() {
         scanManager.initialize(
@@ -95,7 +74,7 @@ class ReceivingViewModel @Inject constructor(
                 ScanMode.SINGLE
             ),
             canStartScan = {
-                // ⭐ 必須先選擇倉庫才能掃描
+                // 必須先選擇倉庫才能掃描
                 _uiState.value.selectedWarehouse != null
             }
         )
@@ -127,23 +106,10 @@ class ReceivingViewModel @Inject constructor(
         }
     }
 
-    fun toggleScanFromButton() {
-        // ⭐ 檢查是否已選擇倉庫
-        if (_uiState.value.selectedWarehouse == null) {
-            _uiState.update { it.copy(error = "請先選擇倉庫位置") }
-            return
-        }
-
+    fun setScanMode(mode: ScanMode) {
         viewModelScope.launch {
-            val isScanning = scanManager.scanState.value.isScanning
-
-            if (isScanning) {
-                Timber.d("🛑 Stopping scan from UI button")
-                scanManager.stopScanning()
-            } else {
-                Timber.d("🚀 Starting scan from UI button")
-                scanManager.startRfidScan(_uiState.value.scanMode)
-            }
+            scanManager.changeScanMode(mode)
+            _uiState.update { it.copy(scanMode = mode) }
         }
     }
 
@@ -155,6 +121,52 @@ class ReceivingViewModel @Inject constructor(
     private fun handleScannedRfidTag(uid: String) {
         Timber.d("🔍 Processing RFID tag: $uid")
         fetchAndValidateBasket(uid)
+    }
+
+    fun clearBaskets() {
+        scanManager.stopScanning()
+        _uiState.update {
+            it.copy(
+                scannedBaskets = emptyList(),
+                totalQuantity = 0
+            )
+        }
+    }
+
+    fun toggleScanFromButton() {
+        // 檢查是否已選擇倉庫
+        if (_uiState.value.selectedWarehouse == null) {
+            _uiState.update { it.copy(error = "請先選擇倉庫位置") }
+            return
+        }
+
+        viewModelScope.launch {
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_uiState.value.scanMode)
+            }
+        }
+    }
+
+    // 選擇倉庫
+    fun selectWarehouse(warehouse: Warehouse) {
+        _uiState.update {
+            it.copy(
+                selectedWarehouse = warehouse,
+                showWarehouseDialog = false
+            )
+        }
+        Timber.d("📍 倉庫已選擇: ${warehouse.name} (${warehouse.id})")
+    }
+
+    // 顯示/隱藏倉庫選擇對話框
+    fun showWarehouseDialog() {
+        _uiState.update { it.copy(showWarehouseDialog = true) }
+    }
+
+    fun dismissWarehouseDialog() {
+        _uiState.update { it.copy(showWarehouseDialog = false) }
     }
 
     private fun fetchAndValidateBasket(uid: String) {
@@ -315,24 +327,6 @@ class ReceivingViewModel @Inject constructor(
         }
     }
 
-    fun setScanMode(mode: ScanMode) {
-        viewModelScope.launch {
-            scanManager.changeScanMode(mode)
-            _uiState.update { it.copy(scanMode = mode) }
-        }
-    }
-
-    fun clearBaskets() {
-        scanManager.stopScanning()
-        _uiState.update {
-            it.copy(
-                scannedBaskets = emptyList(),
-                totalQuantity = 0
-            )
-        }
-        Timber.d("🗑️ Baskets cleared")
-    }
-
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
@@ -343,7 +337,7 @@ class ReceivingViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        scanManager.stopScanning()
+        scanManager.cleanup()
     }
 }
 

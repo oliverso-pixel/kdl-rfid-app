@@ -21,6 +21,7 @@ import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
 import com.kdl.rfidinventory.util.NetworkState
 import com.kdl.rfidinventory.util.ScanMode
 import com.kdl.rfidinventory.util.ScanType
+import timber.log.Timber
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -29,9 +30,15 @@ import java.util.*
 @Composable
 fun BasketManagementScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToDetail: (String) -> Unit,
-    viewModel: AdminViewModel = hiltViewModel()
+    onNavigateToDetail: (String) -> Unit
 ) {
+    val viewModel: AdminViewModel = hiltViewModel()
+
+    // 添加 log 確認
+    LaunchedEffect(Unit) {
+        Timber.d("🎯 BasketManagementScreen created, viewModel instance: ${viewModel.hashCode()}")
+    }
+
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
     val baskets by viewModel.baskets.collectAsStateWithLifecycle()
@@ -195,7 +202,7 @@ fun BasketManagementScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // ⭐ Tab 切換（選擇模式時隱藏）
+            // Tab 切換（選擇模式時隱藏）
             if (!isSelectionMode) {
                 TabRow(
                     selectedTabIndex = when (basketManagementMode) {
@@ -254,8 +261,9 @@ fun BasketManagementScreen(
                         }
                     }
 
-                    // 掃描設置卡片
-                    item {
+                    if (basketManagementMode == BasketManagementMode.REGISTER) {
+                        // 掃描設置卡片
+                        item {
                         ScanSettingsCard(
                             scanMode = scanMode,
                             isScanning = scanState.isScanning,
@@ -272,10 +280,18 @@ fun BasketManagementScreen(
                             helpText = when (basketManagementMode) {
                                 BasketManagementMode.REGISTER -> buildString {
                                     append("📝 登記模式\n")
-                                    append("• RFID：點擊按鈕或按實體按鍵掃描\n")
-                                    append("• 條碼：使用掃碼槍觸發\n")
-                                    append("• 單次模式：掃到後自動停止\n")
-                                    append("• 連續模式：持續掃描多個籃子\n")
+                                    append("• RFID：點擊按鈕掃描 RFID 標籤\n")
+                                    append("• 條碼：使用掃碼槍掃描條碼\n")
+                                    when (scanMode) {
+                                        ScanMode.SINGLE -> {
+                                            append("• 單次模式：掃到後自動停止\n")
+                                            append("• 再按一次實體按鍵可取消\n")
+                                        }
+                                        ScanMode.CONTINUOUS -> {
+                                            append("• 連續模式：持續掃描多個籃子\n")
+                                            append("• 點擊停止或按實體按鍵結束\n")
+                                        }
+                                    }
                                     when (networkState) {
                                         is NetworkState.Connected -> append("• 在線：將檢查服務器並登記")
                                         is NetworkState.Disconnected -> append("• 離線：僅保存到本地")
@@ -283,14 +299,24 @@ fun BasketManagementScreen(
                                     }
                                 }
                                 BasketManagementMode.QUERY -> buildString {
-                                    append("🔍 查詢模式\n")
-                                    append("• RFID：點擊按鈕或按實體按鍵掃描\n")
-                                    append("• 條碼：使用掃碼槍觸發\n")
-                                    append("• 掃描後自動填入搜索框\n")
-                                    append("• 也可手動輸入關鍵字搜索")
+//                                    append("🔍 查詢模式\n")
+//                                    append("• RFID：點擊按鈕掃描 RFID 標籤\n")
+//                                    append("• 條碼：使用掃碼槍掃描條碼\n")
+//                                    when (scanMode) {
+//                                        ScanMode.SINGLE -> {
+//                                            append("• 單次模式：掃到後自動填入搜索框\n")
+//                                            append("• 再按一次實體按鍵可取消\n")
+//                                        }
+//                                        ScanMode.CONTINUOUS -> {
+//                                            append("• 連續模式：每次掃描自動搜索\n")
+//                                            append("• 點擊停止或按實體按鍵結束\n")
+//                                        }
+//                                    }
+//                                    append("• 也可手動輸入關鍵字搜索")
                                 }
                             }
                         )
+                    }
                     }
                 }
 
@@ -479,7 +505,7 @@ fun BasketManagementScreen(
 }
 
 /**
- * ⭐ 可選擇的籃子列表項
+ * 可選擇的籃子列表項
  */
 @Composable
 private fun SelectableBasketListItem(

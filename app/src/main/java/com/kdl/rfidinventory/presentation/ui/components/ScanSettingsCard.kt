@@ -49,6 +49,7 @@ fun ScanSettingsCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+
             // 掃描模式選擇器
             ScanModeSelector(
                 currentMode = scanMode,

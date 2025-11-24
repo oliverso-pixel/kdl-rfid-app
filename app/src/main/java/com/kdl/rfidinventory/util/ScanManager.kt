@@ -33,8 +33,14 @@ class ScanManager @Inject constructor(
     private val _errors = MutableSharedFlow<String>()
     val errors: SharedFlow<String> = _errors.asSharedFlow()
 
+    // ⭐ 當前監聽的 Job（可重新訂閱）
+    private var keyEventCollectorJob: Job? = null
+
     // ⭐ 當前掃描任務
     private var currentScanJob: Job? = null
+
+    // ⭐ 當前的 canStartScan 檢查函數
+    private var currentCanStartScan: (() -> Boolean)? = null
 
     /**
      * 初始化掃描管理器
@@ -48,14 +54,29 @@ class ScanManager @Inject constructor(
         scanMode: StateFlow<ScanMode>,
         canStartScan: () -> Boolean = { true }
     ) {
-        Timber.d("🎯 ScanManager initializing")
+        Timber.d("🎯 ScanManager initializing (instance: ${this.hashCode()})")
+        Timber.d("📊 Current scanMode: ${scanMode.value}, canStartScan: $canStartScan")
 
-        // 監聽實體按鍵事件
-        scope.launch {
-            keyEventHandler.scanTriggerEvents.collect { event ->
-                handleKeyEvent(event, scanMode.value, canStartScan)
-            }
+        // ⭐ 取消之前的監聽器（允許重新訂閱）
+        keyEventCollectorJob?.cancel()
+        Timber.d("🔄 Previous keyEventCollectorJob cancelled")
+
+        // ⭐ 更新 canStartScan
+        currentCanStartScan = canStartScan
+
+        // ⭐ 重新訂閱 KeyEvent + ScanMode
+        keyEventCollectorJob = scope.launch {
+            keyEventHandler.scanTriggerEvents
+                .combine(scanMode) { event, mode ->
+                    Timber.d("🔑 KeyEvent: $event | Current ScanMode from StateFlow: $mode")
+                    event to mode
+                }
+                .collect { (event, currentMode) ->
+                    handleKeyEvent(event, currentMode, canStartScan)
+                }
         }
+
+        Timber.d("✅ ScanManager initialized successfully (instance: ${this.hashCode()})")
     }
 
     /**
@@ -68,7 +89,13 @@ class ScanManager @Inject constructor(
     ) {
         val currentState = _scanState.value
 
-        Timber.d("🔑 KeyEvent: $event | Mode: $currentMode | Scanning: ${currentState.isScanning} | Type: ${currentState.scanType}")
+        Timber.d("🔑 ========== handleKeyEvent ==========")
+        Timber.d("🔑 Event: $event")
+        Timber.d("🔑 Mode: $currentMode")
+        Timber.d("🔑 Current scanning: ${currentState.isScanning}")
+        Timber.d("🔑 Current scanType: ${currentState.scanType}")
+        Timber.d("🔑 canStartScan(): ${canStartScan()}")
+        Timber.d("==========================================")
 
         when (event) {
             is ScanTriggerEvent.StartScan -> {
@@ -113,7 +140,6 @@ class ScanManager @Inject constructor(
                 if (currentMode == ScanMode.SINGLE && currentState.isScanning && currentState.scanType == ScanType.BARCODE) {
                     Timber.d("🛑 Single mode: Cancelling barcode scan")
                     stopScanning()
-//                    _errors.emit("已取消掃描")
                 }
                 // ⭐ 連續模式或 RFID 掃描時，停止掃描
                 else if (currentState.isScanning) {
@@ -197,7 +223,7 @@ class ScanManager @Inject constructor(
             kotlinx.coroutines.delay(100)
         }
 
-        // ⭐ 取消之前的掃描任務
+        // 取消之前的掃描任務
         currentScanJob?.cancel()
 
         _scanState.update {
@@ -291,6 +317,16 @@ class ScanManager @Inject constructor(
             stopScanning()
             kotlinx.coroutines.delay(200)
         }
+    }
+
+    /**
+     * ⭐ 清理資源（在 ViewModel onCleared 時調用）
+     */
+    fun cleanup() {
+        Timber.d("🧹 ScanManager cleanup")
+        keyEventCollectorJob?.cancel()
+        keyEventCollectorJob = null
+        stopScanning()
     }
 }
 

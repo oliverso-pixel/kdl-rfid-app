@@ -39,6 +39,29 @@ class ProductionViewModel @Inject constructor(
         observeScanErrors()
     }
 
+    private fun loadProducts() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            productionRepository.getProductionOrders()
+                .onSuccess { orders ->
+                    val products = orders.map { order ->
+                        Product(
+                            id = order.productId,
+                            barcodeId = order.barcodeId,
+                            qrcodeId = order.qrcodeId,
+                            name = order.productName,
+                            maxBasketCapacity = 60,
+                            imageUrl = order.imageUrl
+                        )
+                    }
+                    _uiState.update { it.copy(products = products, isLoading = false) }
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = error.message, isLoading = false) }
+                }
+        }
+    }
+
     @RequiresApi(Build.VERSION_CODES.O)
     private fun initializeScanManager() {
         scanManager.initialize(
@@ -50,8 +73,7 @@ class ProductionViewModel @Inject constructor(
             ),
             canStartScan = {
                 // 檢查是否已選擇產品和批次（除了產品搜索場景）
-                val state = _uiState.value
-                state.showProductDialog || (state.selectedProduct != null && state.selectedBatch != null)
+                _uiState.value.showProductDialog || (_uiState.value.selectedProduct != null && _uiState.value.selectedBatch != null)
             }
         )
     }
@@ -91,26 +113,47 @@ class ProductionViewModel @Inject constructor(
         }
     }
 
-    private fun loadProducts() {
+    fun setScanMode(mode: ScanMode) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            productionRepository.getProductionOrders()
-                .onSuccess { orders ->
-                    val products = orders.map { order ->
-                        Product(
-                            id = order.productId,
-                            barcodeId = order.barcodeId,
-                            qrcodeId = order.qrcodeId,
-                            name = order.productName,
-                            maxBasketCapacity = 60,
-                            imageUrl = order.imageUrl
-                        )
-                    }
-                    _uiState.update { it.copy(products = products, isLoading = false) }
-                }
-                .onFailure { error ->
-                    _uiState.update { it.copy(error = error.message, isLoading = false) }
-                }
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            }
+            scanManager.changeScanMode(mode)
+            _uiState.update { it.copy(scanMode = mode) }
+        }
+    }
+
+    private fun handleScannedBarcode(barcode: String) {
+        Timber.d("🔍 Processing barcode: $barcode")
+        addOrUpdateBasket(barcode, rssi = 0)
+    }
+
+    private fun handleScannedRfidTag(tag: RFIDTag) {
+        Timber.d("🔍 Processing RFID tag: ${tag.uid}")
+        addOrUpdateBasket(tag.uid, rssi = tag.rssi)
+    }
+
+    fun clearBaskets() {
+        scanManager.stopScanning()
+        _uiState.update {
+            it.copy(
+                scannedBaskets = emptyList(),
+                totalScanCount = 0
+            )
+        }
+    }
+
+    fun toggleScanFromButton() {
+        viewModelScope.launch {
+            if (_uiState.value.selectedProduct == null || _uiState.value.selectedBatch == null) {
+                _uiState.update { it.copy(error = "請先選擇產品和批次") }
+                return@launch
+            }
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_uiState.value.scanMode)
+            }
         }
     }
 
@@ -174,33 +217,6 @@ class ProductionViewModel @Inject constructor(
 
     fun selectBatch(batch: Batch) {
         _uiState.update { it.copy(selectedBatch = batch, showBatchDialog = false) }
-    }
-
-    fun toggleScanFromButton() {
-        viewModelScope.launch {
-            val isScanning = scanManager.scanState.value.isScanning
-
-            if (_uiState.value.selectedProduct == null || _uiState.value.selectedBatch == null) {
-                _uiState.update { it.copy(error = "請先選擇產品和批次") }
-                return@launch
-            }
-
-            if (isScanning) {
-                scanManager.stopScanning()
-            } else {
-                scanManager.startRfidScan(_uiState.value.scanMode)
-            }
-        }
-    }
-
-    private fun handleScannedBarcode(barcode: String) {
-        Timber.d("🔍 Processing barcode: $barcode")
-        addOrUpdateBasket(barcode, rssi = 0)
-    }
-
-    private fun handleScannedRfidTag(tag: RFIDTag) {
-        Timber.d("🔍 Processing RFID tag: ${tag.uid}")
-        addOrUpdateBasket(tag.uid, rssi = tag.rssi)
     }
 
     private fun addOrUpdateBasket(uid: String, rssi: Int) {
@@ -332,13 +348,6 @@ class ProductionViewModel @Inject constructor(
         }
     }
 
-    fun setScanMode(mode: ScanMode) {
-        viewModelScope.launch {
-            scanManager.changeScanMode(mode)
-            _uiState.update { it.copy(scanMode = mode) }
-        }
-    }
-
     fun showProductDialog() {
         _uiState.update { it.copy(showProductDialog = true, productSearchQuery = "") }
 
@@ -371,14 +380,6 @@ class ProductionViewModel @Inject constructor(
         _uiState.update { it.copy(showConfirmDialog = true) }
     }
 
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
-    }
-
-    fun clearSuccess() {
-        _uiState.update { it.copy(successMessage = null) }
-    }
-
     fun resetAll() {
         scanManager.stopScanning()
         _uiState.update {
@@ -391,19 +392,17 @@ class ProductionViewModel @Inject constructor(
         }
     }
 
-    fun clearBaskets() {
-        scanManager.stopScanning()
-        _uiState.update {
-            it.copy(
-                scannedBaskets = emptyList(),
-                totalScanCount = 0
-            )
-        }
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
+    }
+
+    fun clearSuccess() {
+        _uiState.update { it.copy(successMessage = null) }
     }
 
     override fun onCleared() {
         super.onCleared()
-        scanManager.stopScanning()
+        scanManager.cleanup()
     }
 }
 
