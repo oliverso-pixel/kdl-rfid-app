@@ -6,6 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.data.repository.AdminRepository
 import com.kdl.rfidinventory.data.repository.RegisterBasketResult
 import com.kdl.rfidinventory.util.*
@@ -17,8 +19,8 @@ import timber.log.Timber
 import javax.inject.Inject
 
 enum class BasketManagementMode {
-    REGISTER,  // 登記新籃子
-    QUERY      // 查詢現有籃子
+    REGISTER,
+    QUERY
 }
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -27,6 +29,7 @@ class AdminViewModel @Inject constructor(
     private val scanManager: ScanManager,
     private val adminRepository: AdminRepository,
     private val pendingOperationDao: PendingOperationDao,
+    private val webSocketManager: WebSocketManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AdminUiState())
@@ -44,13 +47,16 @@ class AdminViewModel @Inject constructor(
     private val _scanMode = MutableStateFlow(ScanMode.SINGLE)
     val scanMode: StateFlow<ScanMode> = _scanMode.asStateFlow()
 
-    // 籃子管理模式
     private val _basketManagementMode = MutableStateFlow(BasketManagementMode.REGISTER)
     val basketManagementMode: StateFlow<BasketManagementMode> = _basketManagementMode.asStateFlow()
 
     val scanState = scanManager.scanState
 
-    // 添加正在處理的 UID 集合
+    // WebSocket 狀態
+    val webSocketState: StateFlow<WebSocketState> = webSocketManager.connectionState
+    val webSocketEnabled: StateFlow<Boolean> = webSocketManager.enableWebSocket
+    val webSocketUrl: StateFlow<String> = webSocketManager.websocketUrl
+
     private val processingUids = mutableSetOf<String>()
 
     init {
@@ -72,7 +78,10 @@ class AdminViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            settings = settings
+                            settings = settings.copy(
+                                websocketUrl = webSocketUrl.value,
+                                websocketEnabled = webSocketEnabled.value
+                            )
                         )
                     }
                 }
@@ -102,6 +111,8 @@ class AdminViewModel @Inject constructor(
                 adminRepository.getAllLocalBaskets(),
                 _searchQuery
             ) { baskets, query ->
+                Timber.d("🔄 Baskets updated from database: ${baskets.size} total")
+
                 if (query.isBlank()) {
                     baskets
                 } else {
@@ -113,6 +124,7 @@ class AdminViewModel @Inject constructor(
                     }
                 }
             }.collect { filteredBaskets ->
+                Timber.d("📊 Filtered baskets: ${filteredBaskets.size}")
                 _baskets.value = filteredBaskets
             }
         }
@@ -159,21 +171,17 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             Timber.d("🔄 setScanMode called: $mode (current: ${_scanMode.value})")
 
-            // 先停止掃描
             if (scanManager.scanState.value.isScanning) {
                 Timber.d("⏹️ Stopping scan before mode change")
                 scanManager.stopScanning()
                 delay(100)
             }
 
-            // 更新本地狀態
             _scanMode.value = mode
             Timber.d("✅ _scanMode updated to: ${_scanMode.value}")
 
-            // 延遲確保 StateFlow 更新
             delay(50)
 
-            // 通知 ScanManager
             scanManager.changeScanMode(mode)
 
             Timber.d("🔄 Scan mode change complete")
@@ -217,14 +225,12 @@ class AdminViewModel @Inject constructor(
     }
 
     private fun registerBasket(uid: String) {
-        // 檢查是否正在處理這個 UID
         if (processingUids.contains(uid)) {
             Timber.d("⚠️ UID $uid is already being processed, skipping...")
             return
         }
 
         viewModelScope.launch {
-            // 標記為正在處理
             processingUids.add(uid)
             _uiState.update { it.copy(isRegistering = true) }
 
@@ -250,11 +256,9 @@ class AdminViewModel @Inject constructor(
                         )
                     }
 
-                    // 延遲移除（避免重複掃描同一個籃子）
-                    delay(1000) // 1秒內不再接受同一個 UID
+                    delay(1000)
                     processingUids.remove(uid)
 
-                    // 單次掃描模式：掃描成功後自動停止
                     if (_scanMode.value == ScanMode.SINGLE) {
                         scanManager.stopScanning()
                     }
@@ -267,10 +271,8 @@ class AdminViewModel @Inject constructor(
                         )
                     }
 
-                    // 失敗時立即移除
                     processingUids.remove(uid)
 
-                    // 註冊失敗時，單次模式也停止掃描
                     if (_scanMode.value == ScanMode.SINGLE) {
                         scanManager.stopScanning()
                     }
@@ -281,15 +283,12 @@ class AdminViewModel @Inject constructor(
     private fun queryBasket(uid: String) {
         Timber.d("🔍 Querying basket: $uid")
 
-        // 自動填入搜索框
         _searchQuery.value = uid
 
-        // 提示用戶
         _uiState.update {
             it.copy(successMessage = "已搜索籃子: ${uid.takeLast(8)}")
         }
 
-        // 單次模式自動停止
         if (_scanMode.value == ScanMode.SINGLE) {
             scanManager.stopScanning()
         }
@@ -437,6 +436,34 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    fun updateWebSocketUrl(url: String) {
+        webSocketManager.updateWebSocketUrl(url)
+        _uiState.update {
+            it.copy(
+                settings = it.settings.copy(websocketUrl = url),
+                successMessage = "WebSocket 地址已更新"
+            )
+        }
+    }
+
+    fun toggleWebSocket(enabled: Boolean) {
+        webSocketManager.setWebSocketEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                settings = it.settings.copy(websocketEnabled = enabled),
+                successMessage = if (enabled) "WebSocket 已啟用" else "WebSocket 已禁用"
+            )
+        }
+    }
+
+    fun reconnectWebSocket() {
+        viewModelScope.launch {
+            webSocketManager.disconnect()
+            delay(500)
+            webSocketManager.connect()
+        }
+    }
+
     fun updateScanTimeout(timeout: Int) {
         viewModelScope.launch {
             adminRepository.updateScanTimeout(timeout)
@@ -487,6 +514,14 @@ class AdminViewModel @Inject constructor(
         _uiState.update { it.copy(showServerUrlDialog = false) }
     }
 
+    fun showWebSocketUrlDialog() {
+        _uiState.update { it.copy(showWebSocketUrlDialog = true) }
+    }
+
+    fun dismissWebSocketUrlDialog() {
+        _uiState.update { it.copy(showWebSocketUrlDialog = false) }
+    }
+
     fun showScanTimeoutDialog() {
         _uiState.update { it.copy(showScanTimeoutDialog = true) }
     }
@@ -522,6 +557,7 @@ data class AdminUiState(
     val pendingOperationsCount: Int = 0,
     val showClearDataDialog: Boolean = false,
     val showServerUrlDialog: Boolean = false,
+    val showWebSocketUrlDialog: Boolean = false,
     val showScanTimeoutDialog: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null
@@ -529,6 +565,8 @@ data class AdminUiState(
 
 data class AppSettings(
     val serverUrl: String = "http://192.168.1.100:8080",
+    val websocketUrl: String = "ws://192.168.1.100/ws",
+    val websocketEnabled: Boolean = false,
     val scanTimeoutSeconds: Int = 30,
     val autoSync: Boolean = true,
     val appVersion: String = "1.0.0",

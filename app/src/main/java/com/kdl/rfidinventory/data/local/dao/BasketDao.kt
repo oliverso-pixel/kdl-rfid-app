@@ -16,7 +16,7 @@ interface BasketDao {
     @Query("SELECT * FROM baskets WHERE status = :status")
     fun getBasketsByStatus(status: BasketStatus): Flow<List<BasketEntity>>
 
-    @Query("SELECT * FROM baskets")
+    @Query("SELECT * FROM baskets ORDER BY lastUpdated DESC")
     fun getAllBaskets(): Flow<List<BasketEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

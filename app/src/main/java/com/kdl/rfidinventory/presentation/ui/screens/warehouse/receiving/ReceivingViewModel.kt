@@ -4,14 +4,20 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.repository.BasketValidationForReceivingResult
+import com.kdl.rfidinventory.data.repository.ReceivingItem
 import com.kdl.rfidinventory.data.repository.Warehouse
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
@@ -20,16 +26,38 @@ import javax.inject.Inject
 @HiltViewModel
 class ReceivingViewModel @Inject constructor(
     private val scanManager: ScanManager,
-    private val warehouseRepository: WarehouseRepository
+    private val warehouseRepository: WarehouseRepository,
+    private val webSocketManager: WebSocketManager,
+    private val pendingOperationDao: PendingOperationDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReceivingUiState())
     val uiState: StateFlow<ReceivingUiState> = _uiState.asStateFlow()
 
-    private val _networkState = MutableStateFlow<NetworkState>(NetworkState.Connected)
-    val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
+    val isOnline: StateFlow<Boolean> = webSocketManager.isOnline
+
+    // 綜合網絡狀態（結合 isOnline 和待同步數量）
+    val networkState: StateFlow<NetworkState> = combine(
+        isOnline,
+        pendingOperationDao.getPendingCount()
+    ) { online, pendingCount ->
+        if (online) {
+            NetworkState.Connected
+        } else {
+            NetworkState.Disconnected(pendingCount)
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = NetworkState.Disconnected(0)
+    )
+
+//    private val _networkState = MutableStateFlow<NetworkState>(NetworkState.Connected)
+//    val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
 
     val scanState = scanManager.scanState
+
+    private val validatingUids = mutableSetOf<String>()
 
     init {
         Timber.d("ReceivingViewModel initialized")
@@ -169,77 +197,144 @@ class ReceivingViewModel @Inject constructor(
         _uiState.update { it.copy(showWarehouseDialog = false) }
     }
 
+    /**
+     *  驗證並添加籃子
+     */
     private fun fetchAndValidateBasket(uid: String) {
+        // 防止重複驗證
+        if (validatingUids.contains(uid)) {
+            Timber.d("⏭️ Basket $uid is already being validated, skipping...")
+            return
+        }
+
+        // 檢查是否已經在列表中
         if (_uiState.value.scannedBaskets.any { it.basket.uid == uid }) {
             _uiState.update { it.copy(error = "籃子已掃描: ${uid.takeLast(8)}") }
+            // 單次模式停止掃描
+            if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                scanManager.stopScanning()
+            }
             return
         }
 
         viewModelScope.launch {
+            validatingUids.add(uid)
             _uiState.update { it.copy(isValidating = true) }
 
-            warehouseRepository.getBasketByUid(uid)
-                .onSuccess { basket ->
-                    Timber.d("✅ Basket fetched: ${basket.uid}, Status: ${basket.status}")
+            val online = isOnline.value
+            Timber.d("🌐 Validating basket for receiving - isOnline: $isOnline")
 
-                    val isValidStatus = basket.status == BasketStatus.IN_PRODUCTION
+            val validationResult = warehouseRepository.validateBasketForReceiving(uid, online)
 
-                    val statusMessage = if (!isValidStatus) {
-                        when (basket.status) {
-                            BasketStatus.UNASSIGNED -> "⚠️ 狀態錯誤：未配置"
-                            BasketStatus.RECEIVED -> "⚠️ 狀態錯誤：已收貨"
-                            BasketStatus.IN_STOCK -> "⚠️ 狀態錯誤：已在庫"
-                            BasketStatus.SHIPPED -> "⚠️ 狀態錯誤：已出貨"
-                            BasketStatus.SAMPLING -> "⚠️ 狀態錯誤：抽樣中"
-                            else -> "⚠️ 狀態錯誤：${basket.status.name}"
-                        }
-                    } else {
-                        "✅ 籃子 ${uid.takeLast(8)} 已加入"
-                    }
-
-                    val item = ScannedBasketItem(
-                        id = UUID.randomUUID().toString(),
-                        basket = basket
-                    )
-
-                    _uiState.update { state ->
-                        state.copy(
-                            scannedBaskets = state.scannedBaskets + item,
-                            totalQuantity = state.totalQuantity + basket.quantity,
-                            isValidating = false,
-                            successMessage = if (isValidStatus) statusMessage else null,
-                            error = if (!isValidStatus) statusMessage else null
-                        )
-                    }
+            when (validationResult) {
+                is BasketValidationForReceivingResult.Valid -> {
+                    Timber.d("✅ Basket validated successfully for receiving: $uid")
+                    addBasket(validationResult.basket)
                 }
-                .onFailure { error ->
-                    Timber.e(error, "Failed to fetch basket")
+
+                is BasketValidationForReceivingResult.NotRegistered -> {
+                    Timber.w("⚠️ Basket not registered: $uid")
                     _uiState.update {
                         it.copy(
                             isValidating = false,
-                            error = "查詢籃子失敗: ${error.message}"
+                            error = "籃子 ${uid.takeLast(8)} 尚未登記"
                         )
                     }
+                    // 單次模式停止掃描
+                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
                 }
+
+                is BasketValidationForReceivingResult.InvalidStatus -> {
+                    Timber.w("⚠️ Basket has invalid status for receiving: $uid (${validationResult.currentStatus})")
+                    val statusText = getStatusText(validationResult.currentStatus)
+                    _uiState.update {
+                        it.copy(
+                            isValidating = false,
+                            error = "籃子 ${uid.takeLast(8)} 狀態為「${statusText}」，無法收貨\n只能收貨「生產中」狀態的籃子"
+                        )
+                    }
+                    // 單次模式停止掃描
+                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+
+                is BasketValidationForReceivingResult.Error -> {
+                    Timber.e("❌ Basket validation error: $uid - ${validationResult.message}")
+                    _uiState.update {
+                        it.copy(
+                            isValidating = false,
+                            error = "驗證籃子失敗: ${validationResult.message}"
+                        )
+                    }
+                    // 單次模式停止掃描
+                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+            }
+
+            // 移除驗證標記
+            kotlinx.coroutines.delay(300)
+            validatingUids.remove(uid)
+        }
+    }
+
+    /**
+     *  添加籃子到列表
+     */
+    private fun addBasket(basket: Basket) {
+        val item = ScannedBasketItem(
+            id = UUID.randomUUID().toString(),
+            basket = basket
+        )
+
+        _uiState.update { state ->
+            state.copy(
+                scannedBaskets = state.scannedBaskets + item,
+                totalQuantity = state.totalQuantity + basket.quantity,
+                isValidating = false,
+                successMessage = "✅ 籃子 ${basket.uid.takeLast(8)} 已添加"
+            )
+        }
+
+        // 單次掃描模式：成功後自動停止
+        if (_uiState.value.scanMode == ScanMode.SINGLE) {
+            scanManager.stopScanning()
+        }
+    }
+
+    private fun getStatusText(status: BasketStatus): String {
+        return when (status) {
+            BasketStatus.UNASSIGNED -> "未配置"
+            BasketStatus.IN_PRODUCTION -> "生產中"
+            BasketStatus.RECEIVED -> "已收貨"
+            BasketStatus.IN_STOCK -> "在庫中"
+            BasketStatus.SHIPPED -> "已出貨"
+            BasketStatus.SAMPLING -> "抽樣中"
         }
     }
 
     fun updateBasketQuantity(uid: String, newQuantity: Int) {
         _uiState.update { state ->
+            val oldQuantity = state.scannedBaskets
+                .find { it.basket.uid == uid }
+                ?.basket?.quantity ?: 0
+
+            val quantityDiff = newQuantity - oldQuantity
+
             state.copy(
                 scannedBaskets = state.scannedBaskets.map { item ->
                     if (item.basket.uid == uid) {
-                        val oldQuantity = item.basket.quantity
                         val updatedBasket = item.basket.copy(quantity = newQuantity)
-                        val quantityDiff = newQuantity - oldQuantity
-
-                        _uiState.update { it.copy(totalQuantity = it.totalQuantity + quantityDiff) }
-
                         item.copy(basket = updatedBasket)
                     } else {
                         item
                     }
-                }
+                },
+                totalQuantity = (state.totalQuantity + quantityDiff).coerceAtLeast(0)
             )
         }
     }
@@ -301,18 +396,24 @@ class ReceivingViewModel @Inject constructor(
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-            val isOnline = _networkState.value is NetworkState.Connected
-            val uids = items.map { it.basket.uid }
+            val online = isOnline.value
 
-//            warehouseRepository.receiveBaskets(uids, warehouse.id, isOnline)
-            warehouseRepository.receiveBaskets(uids, isOnline)
+            // 轉換為 ReceivingItem（包含 quantity）
+            val receivingItems = items.map { item ->
+                ReceivingItem(
+                    uid = item.basket.uid,
+                    quantity = item.basket.quantity
+                )
+            }
+
+            warehouseRepository.receiveBaskets(receivingItems, warehouse.id, online)
                 .onSuccess {
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             scannedBaskets = emptyList(),
                             totalQuantity = 0,
-                            successMessage = "✅ 收貨成功，共 ${uids.size} 個籃子\n倉庫：${warehouse.name}\n可繼續掃描下一批"
+                            successMessage = "✅ 收貨成功，共 ${receivingItems.size} 個籃子\n倉庫：${warehouse.name}\n可繼續掃描下一批"
                         )
                     }
                 }

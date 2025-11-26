@@ -5,16 +5,30 @@ import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.ApiService
+import com.kdl.rfidinventory.data.remote.dto.request.ClearRequest
 import com.kdl.rfidinventory.data.remote.dto.request.ScanRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
+import com.kdl.rfidinventory.data.remote.dto.response.BasketResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * 籃子驗證結果
+ */
+sealed class BasketValidationResult {
+    data class Valid(val basket: Basket) : BasketValidationResult()
+    data class NotRegistered(val uid: String) : BasketValidationResult()
+    data class InvalidStatus(val basket: Basket, val currentStatus: BasketStatus) : BasketValidationResult()
+    data class AlreadyInProduction(val basket: Basket) : BasketValidationResult()
+    data class Error(val message: String) : BasketValidationResult()
+}
 
 @Singleton
 class BasketRepository @Inject constructor(
@@ -23,40 +37,80 @@ class BasketRepository @Inject constructor(
     private val pendingOperationDao: PendingOperationDao
 ) {
 
-//    suspend fun scanBasket(uid: String, isOnline: Boolean): Result<Basket> = withContext(Dispatchers.IO) {
-//        try {
-//            if (isOnline) {
-//                val response = apiService.scanBasket(ScanRequest(uid))
-//                if (response.success && response.data != null) {
-//                    val basket = response.data.toBasket()
-//                    basketDao.insertBasket(basket.toEntity())
-//                    Result.success(basket)
-//                } else {
-//                    Result.failure(Exception(response.message ?: "掃描失敗"))
-//                }
-//            } else {
-//                val entity = basketDao.getBasketByUid(uid)
-//                if (entity != null) {
-//                    Result.success(entity.toBasket())
-//                } else {
-//                    delay(300)
-//                    val newBasket = Basket(
-//                        uid = uid,
-//                        product = null,
-//                        batch = null,
-//                        quantity = 0,
-//                        status = BasketStatus.UNASSIGNED,
-//                        productionDate = null,
-//                        lastUpdated = System.currentTimeMillis()
-//                    )
-//                    basketDao.insertBasket(newBasket.toEntity())
-//                    Result.success(newBasket)
-//                }
-//            }
-//        } catch (e: Exception) {
-//            Result.failure(e)
-//        }
-//    }
+    /**
+     * 檢查籃子是否可用於生產
+     * @param uid 籃子 UID
+     * @param isOnline 是否在線
+     * @return 驗證結果
+     */
+    suspend fun validateBasketForProduction(uid: String, isOnline: Boolean): BasketValidationResult = withContext(Dispatchers.IO) {
+        try {
+            if (isOnline) {
+                // 在線：從服務器檢查
+                Timber.d("🌐 Online: Validating basket from server: $uid")
+                val response = apiService.scanBasket(ScanRequest(uid))
+
+                if (response.success && response.data != null) {
+                    val basket = response.data.toBasket()
+
+                    // 檢查狀態
+                    when (basket.status) {
+                        BasketStatus.UNASSIGNED -> {
+                            Timber.d("✅ Basket is valid: $uid (UNASSIGNED)")
+                            // 更新本地數據庫
+                            basketDao.insertBasket(basket.toEntity())
+                            BasketValidationResult.Valid(basket)
+                        }
+                        BasketStatus.IN_PRODUCTION -> {
+                            Timber.w("⚠️ Basket is already in production: $uid")
+                            basketDao.insertBasket(basket.toEntity())
+                            BasketValidationResult.AlreadyInProduction(basket)
+                        }
+                        else -> {
+                            Timber.w("⚠️ Basket has invalid status: $uid (${basket.status})")
+                            basketDao.insertBasket(basket.toEntity())
+                            BasketValidationResult.InvalidStatus(basket, basket.status)
+                        }
+                    }
+                } else {
+                    // 服務器沒有這個籃子記錄
+                    Timber.w("⚠️ Basket not registered on server: $uid")
+                    BasketValidationResult.NotRegistered(uid)
+                }
+            } else {
+                // 離線：從本地數據庫檢查
+                Timber.d("📱 Offline: Validating basket from local database: $uid")
+                val entity = basketDao.getBasketByUid(uid)
+
+                if (entity != null) {
+                    val basket = entity.toBasket()
+
+                    // 檢查狀態
+                    when (basket.status) {
+                        BasketStatus.UNASSIGNED -> {
+                            Timber.d("✅ Basket is valid (local): $uid (UNASSIGNED)")
+                            BasketValidationResult.Valid(basket)
+                        }
+                        BasketStatus.IN_PRODUCTION -> {
+                            Timber.w("⚠️ Basket is already in production (local): $uid")
+                            BasketValidationResult.AlreadyInProduction(basket)
+                        }
+                        else -> {
+                            Timber.w("⚠️ Basket has invalid status (local): $uid (${basket.status})")
+                            BasketValidationResult.InvalidStatus(basket, basket.status)
+                        }
+                    }
+                } else {
+                    // 本地沒有這個籃子記錄
+                    Timber.w("⚠️ Basket not registered locally: $uid")
+                    BasketValidationResult.NotRegistered(uid)
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "❌ Error validating basket: $uid")
+            BasketValidationResult.Error(e.message ?: "驗證失敗")
+        }
+    }
 
     suspend fun getBasketByUid(uid: String): Result<Basket> = withContext(Dispatchers.IO) {
         try {
@@ -140,7 +194,7 @@ class BasketRepository @Inject constructor(
     suspend fun clearBasketConfiguration(uids: List<String>, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             if (isOnline) {
-                val request = com.kdl.rfidinventory.data.remote.dto.request.ClearRequest(
+                val request = ClearRequest(
                     basketUids = uids,
                     timestamp = System.currentTimeMillis().toString()
                 )
@@ -155,6 +209,8 @@ class BasketRepository @Inject constructor(
                                     productName = null,
                                     batchId = null,
                                     quantity = 0,
+                                    productionDate = null,
+                                    warehouseId = null,
                                     status = BasketStatus.UNASSIGNED,
                                     lastUpdated = System.currentTimeMillis()
                                 )
@@ -183,6 +239,8 @@ class BasketRepository @Inject constructor(
                                 productName = null,
                                 batchId = null,
                                 quantity = 0,
+                                productionDate = null,
+                                warehouseId = null,
                                 status = BasketStatus.UNASSIGNED,
                                 lastUpdated = System.currentTimeMillis()
                             )

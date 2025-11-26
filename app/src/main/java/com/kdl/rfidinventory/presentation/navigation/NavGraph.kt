@@ -26,7 +26,7 @@ sealed class Screen(val route: String, val title: String) {
     data object Inventory : Screen("inventory", "倉庫盤點")
     data object Shipping : Screen("shipping", "出貨模式")
     data object Clear : Screen("clear", "清除配置")
-    data object Sampling : Screen("sampling", "抽樣檢驗")
+//    data object Sampling : Screen("sampling", "抽樣檢驗")
     data object Admin : Screen("admin", "管理員設定")
     data object BasketManagement : Screen("basket_management", "籃子管理")
     data object BasketDetail : Screen("basket_detail/{uid}", "籃子詳情") {
@@ -78,11 +78,11 @@ fun NavGraph(
             )
         }
 
-        composable(Screen.Sampling.route) {
-            SamplingScreen(
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
+//        composable(Screen.Sampling.route) {
+//            SamplingScreen(
+//                onNavigateBack = { navController.popBackStack() }
+//            )
+//        }
 
         composable(Screen.Admin.route) {
             AdminScreen(

@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.presentation.navigation.Screen
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 
@@ -24,15 +25,31 @@ fun MainScreen(
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
+    val webSocketState by viewModel.webSocketState.collectAsStateWithLifecycle()
+    val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
+    val pendingCount by viewModel.pendingOperationsCount.collectAsStateWithLifecycle()
+    val webSocketEnabled by viewModel.webSocketEnabled.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
             Column {
                 TopAppBar(
                     title = { Text("RFID 庫存管理系統") },
+                    actions = {
+                        // 連接狀態指示器
+                        WebSocketStatusIndicator(
+                            webSocketState = webSocketState,
+                            isOnline = isOnline,
+                            pendingCount = pendingCount,
+                            webSocketEnabled = webSocketEnabled,
+                            onReconnect = { viewModel.reconnectWebSocket() },
+                            onSync = { viewModel.syncPendingOperations() }
+                        )
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primary,
-                        titleContentColor = MaterialTheme.colorScheme.onPrimary
+                        titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                        actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 )
                 ConnectionStatusBar(networkState = networkState)
@@ -105,12 +122,12 @@ fun MainScreen(
                         icon = Icons.Default.Clear,
                         route = Screen.Clear.route
                     ),
-                    MenuItem(
-                        title = "抽樣檢驗",
-                        description = "標記籃子進行抽樣檢驗",
-                        icon = Icons.Default.Science,
-                        route = Screen.Sampling.route
-                    ),
+//                    MenuItem(
+//                        title = "抽樣檢驗",
+//                        description = "標記籃子進行抽樣檢驗",
+//                        icon = Icons.Default.Science,
+//                        route = Screen.Sampling.route
+//                    ),
                     MenuItem(
                         title = "管理員設定",
                         description = "系統設定和權限管理",
@@ -120,6 +137,127 @@ fun MainScreen(
                 ),
                 navController = navController
             )
+        }
+    }
+}
+
+@Composable
+private fun WebSocketStatusIndicator(
+    webSocketState: WebSocketState,
+    isOnline: Boolean,
+    pendingCount: Int,
+    webSocketEnabled: Boolean,
+    onReconnect: () -> Unit,
+    onSync: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        IconButton(onClick = { showMenu = true }) {
+            when {
+                !webSocketEnabled -> {
+                    // WebSocket 禁用時顯示特殊圖標
+                    Icon(
+                        imageVector = Icons.Default.CloudOff,
+                        contentDescription = "WebSocket 已禁用",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                isOnline -> {
+                    Icon(
+                        imageVector = Icons.Default.CloudDone,
+                        contentDescription = "在線",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+                webSocketState is WebSocketState.Connecting -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                }
+                else -> {
+                    BadgedBox(
+                        badge = {
+                            if (pendingCount > 0) {
+                                Badge { Text(pendingCount.toString()) }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = "離線",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false }
+        ) {
+            // 狀態顯示
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            text = when {
+                                !webSocketEnabled -> "WebSocket 已禁用"
+                                webSocketState is WebSocketState.Connected -> "已連接"
+                                webSocketState is WebSocketState.Connecting -> "連接中..."
+                                webSocketState is WebSocketState.Disconnected ->
+                                    "已斷開: ${webSocketState.reason ?: "未知原因"}"
+                                webSocketState is WebSocketState.Error ->
+                                    "錯誤: ${webSocketState.error}"
+                                else -> "未知狀態"
+                            },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        if (pendingCount > 0) {
+                            Text(
+                                text = "待同步操作: $pendingCount",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                },
+                onClick = { }
+            )
+
+            Divider()
+
+            // ⭐ 重新連接（只在啟用且未連接時顯示）
+            if (webSocketEnabled && !isOnline) {
+                DropdownMenuItem(
+                    text = { Text("重新連接") },
+                    onClick = {
+                        onReconnect()
+                        showMenu = false
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                    }
+                )
+            }
+
+            // 同步數據
+            if (pendingCount > 0 && isOnline) {
+                DropdownMenuItem(
+                    text = { Text("同步數據 ($pendingCount)") },
+                    onClick = {
+                        onSync()
+                        showMenu = false
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                    }
+                )
+            }
         }
     }
 }

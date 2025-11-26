@@ -1,7 +1,9 @@
 package com.kdl.rfidinventory.data.repository
 
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
+import com.kdl.rfidinventory.data.remote.dto.response.BasketResponse
 import com.kdl.rfidinventory.data.model.*
+import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
 
 // BasketEntity 轉 Basket
 fun BasketEntity.toBasket(): Basket {
@@ -50,8 +52,42 @@ fun Basket.toEntity(): BasketEntity {
     )
 }
 
+// BasketDetailResponse 轉 Basket
+fun BasketDetailResponse.toBasket(): Basket {
+    return Basket(
+        uid = uid,
+        product = if (productId != null && productName != null) {
+            Product(
+                id = productId,
+                name = productName,
+                maxBasketCapacity = 60
+            )
+        } else null,
+        batch = batchId?.let {
+            Batch(
+                id = it,
+                productId = productId ?: "",
+                totalQuantity = quantity,
+                remainingQuantity = quantity,
+                productionDate = productionDate ?: ""
+            )
+        },
+        warehouseId = warehouseId,
+        quantity = quantity,
+        status = try {
+            BasketStatus.valueOf(status)
+        } catch (e: Exception) {
+            BasketStatus.UNASSIGNED
+        },
+        productionDate = productionDate,
+        expireDate = expireDate,
+        lastUpdated = lastUpdated,
+        updateBy = updateBy
+    )
+}
+
 // API Response 轉 Basket
-fun com.kdl.rfidinventory.data.remote.dto.response.BasketResponse.toBasket(): Basket {
+fun BasketResponse.toBasket(): Basket {
     return Basket(
         uid = uid,
         product = if (productId != null && productName != null) {

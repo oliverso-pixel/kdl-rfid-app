@@ -1,8 +1,11 @@
 package com.kdl.rfidinventory.presentation.ui.screens.warehouse.inventory
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -12,10 +15,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.kdl.rfidinventory.data.model.BasketStatus
-import com.kdl.rfidinventory.presentation.ui.components.BasketListItem
+import com.kdl.rfidinventory.data.repository.Warehouse
+import com.kdl.rfidinventory.data.repository.getDaysUntilExpiry
+import com.kdl.rfidinventory.presentation.ui.components.BasketCard
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
+import com.kdl.rfidinventory.presentation.ui.components.InventoryStatistics
+import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
 
+@RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InventoryScreen(
@@ -25,22 +32,20 @@ fun InventoryScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var showFilterMenu by remember { mutableStateOf(false) }
+    val scanState by viewModel.scanState.collectAsStateWithLifecycle()
 
-    // 錯誤提示
-    uiState.error?.let { error ->
-        LaunchedEffect(error) {
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { error ->
             snackbarHostState.showSnackbar(
                 message = error,
-                duration = SnackbarDuration.Short
+                duration = SnackbarDuration.Long
             )
             viewModel.clearError()
         }
     }
 
-    // 成功提示
-    uiState.successMessage?.let { message ->
-        LaunchedEffect(message) {
+    LaunchedEffect(uiState.successMessage) {
+        uiState.successMessage?.let { message ->
             snackbarHostState.showSnackbar(
                 message = message,
                 duration = SnackbarDuration.Short
@@ -50,6 +55,7 @@ fun InventoryScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Column {
                 TopAppBar(
@@ -60,34 +66,17 @@ fun InventoryScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { showFilterMenu = true }) {
-                            Icon(Icons.Default.FilterList, contentDescription = "篩選")
-                        }
-                        DropdownMenu(
-                            expanded = showFilterMenu,
-                            onDismissRequest = { showFilterMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("全部") },
-                                onClick = {
-                                    viewModel.setFilterStatus(null)
-                                    showFilterMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("已收貨") },
-                                onClick = {
-                                    viewModel.setFilterStatus(BasketStatus.RECEIVED)
-                                    showFilterMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("在庫中") },
-                                onClick = {
-                                    viewModel.setFilterStatus(BasketStatus.IN_STOCK)
-                                    showFilterMenu = false
-                                }
-                            )
+                        if (uiState.selectedProduct != null && uiState.scannedBaskets.isNotEmpty()) {
+                            IconButton(
+                                onClick = { viewModel.clearBaskets() },
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "清空掃描列表",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
                         }
 
                         IconButton(onClick = { viewModel.exportInventory() }) {
@@ -107,122 +96,171 @@ fun InventoryScreen(
                 )
                 ConnectionStatusBar(networkState = networkState)
             }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 搜尋欄
-            OutlinedTextField(
-                value = uiState.searchQuery,
-                onValueChange = { viewModel.setSearchQuery(it) },
-                label = { Text("搜尋籃子、產品或批次") },
-                leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (uiState.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "清除")
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // 倉庫選擇
+                item {
+                    WarehouseSelectionCard(
+                        selectedWarehouse = uiState.selectedWarehouse,
+                        onSelectWarehouse = { viewModel.showWarehouseDialog() }
+                    )
+                }
+
+                // 統計
+                if (uiState.selectedWarehouse != null) {
+                    item {
+                        StatisticsCard(statistics = uiState.statistics)
+                    }
+                }
+
+                // 產品列表或掃描界面
+                if (uiState.selectedProduct == null) {
+                    // 產品列表
+                    if (uiState.productGroups.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "產品列表 (點擊進行盤點)",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+
+                        items(
+                            items = uiState.productGroups,
+                            key = { it.product.id }
+                        ) { group ->
+                            ProductGroupCard(
+                                group = group,
+                                onClick = { viewModel.selectProduct(group.product) }
+                            )
                         }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+                } else {
+                    // 掃描界面
+                    item {
+                        SelectedProductCard(
+                            product = uiState.selectedProduct!!,
+                            onDeselect = { viewModel.deselectProduct() }
+                        )
+                    }
 
-            // 統計卡片
+                    item {
+                        ScanSettingsCard(
+                            scanMode = uiState.scanMode,
+                            isScanning = scanState.isScanning,
+                            scanType = scanState.scanType,
+                            isValidating = uiState.isValidating,
+                            onModeChange = { viewModel.setScanMode(it) },
+                            onToggleScan = { viewModel.toggleScanFromButton() },
+                            statisticsContent = {
+                                InventoryStatistics(
+                                    scannedCount = uiState.scannedBaskets.size,
+                                    isScanning = scanState.isScanning,
+                                    onClearBaskets = { viewModel.clearBaskets() }
+                                )
+                            },
+                            helpText = "• 掃描以確認籃子在庫\n• RFID：點擊按鈕掃描\n• 條碼：使用實體掃碼槍\n• 單次模式：再按一次可取消"
+                        )
+                    }
+
+                    if (uiState.scannedBaskets.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "已確認籃子 (${uiState.scannedBaskets.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+
+                        items(
+                            items = uiState.scannedBaskets,
+                            key = { it.id }
+                        ) { item ->
+                            BasketCard(
+                                basket = item.basket,
+                                maxCapacity = item.basket.product?.maxBasketCapacity,
+                                onQuantityChange = {},
+                                onRemove = { viewModel.removeBasket(item.basket.uid) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (uiState.showWarehouseDialog) {
+        WarehouseSelectionDialog(
+            warehouses = uiState.warehouses,
+            selectedWarehouse = uiState.selectedWarehouse,
+            onSelect = { viewModel.selectWarehouse(it) },
+            onDismiss = { viewModel.dismissWarehouseDialog() }
+        )
+    }
+}
+
+@Composable
+private fun StatisticsCard(statistics: InventoryStatistics) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                StatisticCard(
-                    title = "總籃數",
-                    value = uiState.statistics.totalBaskets.toString(),
+                StatisticItem(
+                    label = "總籃數",
+                    value = statistics.totalBaskets.toString(),
                     modifier = Modifier.weight(1f)
                 )
-                StatisticCard(
-                    title = "在庫中",
-                    value = uiState.statistics.inStock.toString(),
-                    modifier = Modifier.weight(1f)
-                )
-                StatisticCard(
-                    title = "總數量",
-                    value = uiState.statistics.totalQuantity.toString(),
+                StatisticItem(
+                    label = "總數量",
+                    value = statistics.totalQuantity.toString(),
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            // 當前篩選狀態
-            if (uiState.filterStatus != null) {
-                AssistChip(
-                    onClick = { viewModel.setFilterStatus(null) },
-                    label = { Text("狀態: ${uiState.filterStatus?.name}") },
-                    trailingIcon = {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "清除篩選",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                )
-            }
-
-            // 籃子列表
-            if (uiState.isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            } else if (uiState.baskets.isEmpty()) {
+            if (statistics.expiringCount > 0) {
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        containerColor = MaterialTheme.colorScheme.errorContainer
                     )
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Inventory,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
-                            Text(
-                                text = "沒有找到籃子",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(uiState.baskets, key = { it.uid }) { basket ->
-                        BasketListItem(
-                            basket = basket,
-                            onClick = { /* TODO: 顯示詳情 */ }
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "${statistics.expiringCount} 個籃子即將到期（7天內）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
                 }
@@ -232,8 +270,8 @@ fun InventoryScreen(
 }
 
 @Composable
-private fun StatisticCard(
-    title: String,
+private fun StatisticItem(
+    label: String,
     value: String,
     modifier: Modifier = Modifier
 ) {
@@ -250,7 +288,7 @@ private fun StatisticCard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = title,
+                text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
@@ -261,4 +299,261 @@ private fun StatisticCard(
             )
         }
     }
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+private fun ProductGroupCard(
+    group: ProductInventoryGroup,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = group.product.name,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${group.totalBaskets} 籃 • ${group.totalQuantity} 個",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (group.expiringCount > 0) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "${group.expiringCount} 即將到期",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedProductCard(
+    product: com.kdl.rfidinventory.data.model.Product,
+    onDeselect: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "當前盤點產品",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = product.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+
+            IconButton(onClick = onDeselect) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "返回產品列表",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WarehouseSelectionCard(
+    selectedWarehouse: Warehouse?,
+    onSelectWarehouse: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selectedWarehouse != null) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.errorContainer
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warehouse,
+                        contentDescription = null,
+                        tint = if (selectedWarehouse != null) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        }
+                    )
+                    Text(
+                        text = "盤點倉庫",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selectedWarehouse != null) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                if (selectedWarehouse != null) {
+                    Text(
+                        text = selectedWarehouse.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                } else {
+                    Text(
+                        text = "請選擇倉庫位置",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
+            Button(
+                onClick = onSelectWarehouse,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (selectedWarehouse != null) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+            ) {
+                Text(if (selectedWarehouse != null) "更換" else "選擇")
+            }
+        }
+    }
+}
+
+@Composable
+private fun WarehouseSelectionDialog(
+    warehouses: List<Warehouse>,
+    selectedWarehouse: Warehouse?,
+    onSelect: (Warehouse) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Warehouse,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        },
+        title = { Text("選擇盤點倉庫") },
+        text = {
+            if (warehouses.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(warehouses) { warehouse ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { onSelect(warehouse) },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (warehouse.id == selectedWarehouse?.id) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                }
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = warehouse.name,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+
+                                if (warehouse.id == selectedWarehouse?.id) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "已選擇",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("關閉")
+            }
+        }
+    )
 }

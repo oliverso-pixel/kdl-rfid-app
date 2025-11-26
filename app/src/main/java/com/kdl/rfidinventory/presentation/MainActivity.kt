@@ -73,13 +73,11 @@ class MainActivity : ComponentActivity() {
         val keyCode = event.keyCode
         Timber.d("🎯 Activity dispatchKeyEvent: keyCode=$keyCode, action=${event.action}")
 
-        // ⭐ 優先處理條碼 KeyEvent（必須在 KeyEventHandler 之前）
         if (barcodeScanManager.handleKeyEvent(keyCode, event)) {
             Timber.d("✅ Key event handled by BarcodeScanManager")
-            return true  // ⭐ 返回 true，防止事件繼續傳遞
+            return true
         }
 
-        // 處理掃描觸發鍵
         lifecycleScope.launch {
             if (keyEventHandler.handleKeyEvent(keyCode, event)) {
                 Timber.d("✅ Key event handled by KeyEventHandler")

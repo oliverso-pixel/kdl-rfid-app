@@ -4,7 +4,11 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.model.*
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.repository.BasketRepository
+import com.kdl.rfidinventory.data.repository.BasketValidationResult
 import com.kdl.rfidinventory.data.repository.ProductionRepository
 import com.kdl.rfidinventory.util.rfid.RFIDTag
 import com.kdl.rfidinventory.util.*
@@ -20,16 +24,36 @@ import javax.inject.Inject
 @HiltViewModel
 class ProductionViewModel @Inject constructor(
     private val scanManager: ScanManager,
-    private val productionRepository: ProductionRepository
+    private val productionRepository: ProductionRepository,
+    private val basketRepository: BasketRepository,
+    private val webSocketManager: WebSocketManager,
+    private val pendingOperationDao: PendingOperationDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProductionUiState())
     val uiState: StateFlow<ProductionUiState> = _uiState.asStateFlow()
 
-    private val _networkState = MutableStateFlow<NetworkState>(NetworkState.Connected)
-    val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
+    val isOnline: StateFlow<Boolean> = webSocketManager.isOnline
+
+    // 綜合網絡狀態（結合 isOnline 和待同步數量）
+    val networkState: StateFlow<NetworkState> = combine(
+        isOnline,
+        pendingOperationDao.getPendingCount()
+    ) { online, pendingCount ->
+        if (online) {
+            NetworkState.Connected
+        } else {
+            NetworkState.Disconnected(pendingCount)
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = NetworkState.Disconnected(0)
+    )
 
     val scanState = scanManager.scanState
+
+    private val validatingUids = mutableSetOf<String>()
 
     init {
         Timber.d("ProductionViewModel initialized")
@@ -37,6 +61,7 @@ class ProductionViewModel @Inject constructor(
         initializeScanManager()
         observeScanResults()
         observeScanErrors()
+        observeNetworkState()
     }
 
     private fun loadProducts() {
@@ -113,6 +138,14 @@ class ProductionViewModel @Inject constructor(
         }
     }
 
+    private fun observeNetworkState() {
+        viewModelScope.launch {
+            networkState.collect { state ->
+                Timber.d("📡 Production - Network state: $state")
+            }
+        }
+    }
+
     fun setScanMode(mode: ScanMode) {
         viewModelScope.launch {
             if (scanManager.scanState.value.isScanning) {
@@ -125,12 +158,15 @@ class ProductionViewModel @Inject constructor(
 
     private fun handleScannedBarcode(barcode: String) {
         Timber.d("🔍 Processing barcode: $barcode")
-        addOrUpdateBasket(barcode, rssi = 0)
+        //addOrUpdateBasket(barcode, rssi = 0)
+        validateAndAddBasket(barcode, rssi = 0)
+
     }
 
     private fun handleScannedRfidTag(tag: RFIDTag) {
         Timber.d("🔍 Processing RFID tag: ${tag.uid}")
-        addOrUpdateBasket(tag.uid, rssi = tag.rssi)
+        //addOrUpdateBasket(tag.uid, rssi = tag.rssi)
+        validateAndAddBasket(tag.uid, rssi = tag.rssi)
     }
 
     fun clearBaskets() {
@@ -217,6 +253,162 @@ class ProductionViewModel @Inject constructor(
 
     fun selectBatch(batch: Batch) {
         _uiState.update { it.copy(selectedBatch = batch, showBatchDialog = false) }
+    }
+
+    /**
+     *  驗證並添加籃子
+     */
+    private fun validateAndAddBasket(uid: String, rssi: Int) {
+        // 防止重複驗證
+        if (validatingUids.contains(uid)) {
+            Timber.d("⏭️ Basket $uid is already being validated, skipping...")
+            return
+        }
+
+        // 檢查是否已經在列表中
+        val existingBasketIndex = _uiState.value.scannedBaskets.indexOfFirst { it.uid == uid }
+        if (existingBasketIndex != -1) {
+            // 重複掃描：更新計數
+            updateExistingBasket(existingBasketIndex, uid, rssi)
+            return
+        }
+
+        // 開始驗證
+        viewModelScope.launch {
+            validatingUids.add(uid)
+            _uiState.update { it.copy(isValidating = true) }
+
+            val online = isOnline.value
+            Timber.d("🌐 Validating basket - isOnline: $online")
+            val validationResult = basketRepository.validateBasketForProduction(uid, online)
+
+            when (validationResult) {
+                is BasketValidationResult.Valid -> {
+                    Timber.d("✅ Basket validated successfully: $uid")
+                    addNewBasket(uid, rssi, validationResult.basket)
+                }
+
+                is BasketValidationResult.NotRegistered -> {
+                    Timber.w("⚠️ Basket not registered: $uid")
+                    _uiState.update {
+                        it.copy(
+                            error = "籃子 ${uid.takeLast(8)} 尚未登記，請先在「籃子管理」中登記此籃子",
+                            isValidating = false
+                        )
+                    }
+                    // 單次模式停止掃描
+                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+
+                is BasketValidationResult.InvalidStatus -> {
+                    Timber.w("⚠️ Basket has invalid status: $uid (${validationResult.currentStatus})")
+                    val statusText = when (validationResult.currentStatus) {
+                        BasketStatus.RECEIVED -> "已收貨"
+                        BasketStatus.IN_STOCK -> "在庫中"
+                        BasketStatus.SHIPPED -> "已出貨"
+                        BasketStatus.SAMPLING -> "抽樣中"
+                        BasketStatus.IN_PRODUCTION -> "生產中"
+                        BasketStatus.UNASSIGNED -> "未分配"
+                    }
+                    _uiState.update {
+                        it.copy(
+                            error = "籃子 ${uid.takeLast(8)} 狀態為「${statusText}」，無法用於生產",
+                            isValidating = false
+                        )
+                    }
+                    // 單次模式停止掃描
+                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+
+                is BasketValidationResult.AlreadyInProduction -> {
+                    Timber.w("⚠️ Basket is already in production: $uid")
+                    _uiState.update {
+                        it.copy(
+                            error = "籃子 ${uid.takeLast(8)} 已在生產中，無法重複使用",
+                            isValidating = false
+                        )
+                    }
+                    // 單次模式停止掃描
+                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+
+                is BasketValidationResult.Error -> {
+                    Timber.e("❌ Basket validation error: $uid - ${validationResult.message}")
+                    _uiState.update {
+                        it.copy(
+                            error = "驗證籃子失敗: ${validationResult.message}",
+                            isValidating = false
+                        )
+                    }
+                    // 單次模式停止掃描
+                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                        scanManager.stopScanning()
+                    }
+                }
+            }
+
+            // 移除驗證標記
+            kotlinx.coroutines.delay(500)
+            validatingUids.remove(uid)
+        }
+    }
+
+    /**
+     * 更新現有籃子（重複掃描）
+     */
+    private fun updateExistingBasket(index: Int, uid: String, rssi: Int) {
+        val existingBasket = _uiState.value.scannedBaskets[index]
+        val updatedBasket = existingBasket.copy(
+            scanCount = existingBasket.scanCount + 1,
+            lastScannedTime = System.currentTimeMillis(),
+            rssi = rssi
+        )
+
+        _uiState.update { state ->
+            state.copy(
+                scannedBaskets = state.scannedBaskets.toMutableList().apply {
+                    set(index, updatedBasket)
+                },
+                totalScanCount = state.totalScanCount + 1,
+                successMessage = "籃子 ${uid.takeLast(8)} 重複掃描 (第 ${updatedBasket.scanCount} 次)"
+            )
+        }
+    }
+
+    /**
+     * 添加新籃子
+     */
+    private fun addNewBasket(uid: String, rssi: Int, basket: Basket) {
+        val product = _uiState.value.selectedProduct ?: return
+
+        val newBasket = ScannedBasket(
+            uid = uid,
+            quantity = product.maxBasketCapacity,
+            rssi = rssi,
+            scanCount = 1,
+            firstScannedTime = System.currentTimeMillis(),
+            lastScannedTime = System.currentTimeMillis()
+        )
+
+        _uiState.update { state ->
+            state.copy(
+                scannedBaskets = state.scannedBaskets + newBasket,
+                totalScanCount = state.totalScanCount + 1,
+                isValidating = false,
+                successMessage = "✅ 籃子 ${uid.takeLast(8)} 已添加"
+            )
+        }
+
+        // 單次掃描模式：掃描成功後自動停止
+        if (_uiState.value.scanMode == ScanMode.SINGLE) {
+            scanManager.stopScanning()
+        }
     }
 
     private fun addOrUpdateBasket(uid: String, rssi: Int) {
@@ -318,7 +510,8 @@ class ProductionViewModel @Inject constructor(
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-            val isOnline = _networkState.value is NetworkState.Connected
+            val online = isOnline.value
+            Timber.d("📤 Submitting production - isOnline: $online")
             var successCount = 0
             var failCount = 0
 
@@ -329,7 +522,7 @@ class ProductionViewModel @Inject constructor(
                     batchId = batch.id,
                     quantity = basket.quantity,
                     productionDate = batch.productionDate,
-                    isOnline = isOnline
+                    isOnline = online
                 ).onSuccess {
                     successCount++
                 }.onFailure {
@@ -408,6 +601,7 @@ class ProductionViewModel @Inject constructor(
 
 data class ProductionUiState(
     val isLoading: Boolean = false,
+    val isValidating: Boolean = false,
     val scanMode: ScanMode = ScanMode.SINGLE,
     val products: List<Product> = emptyList(),
     val batches: List<Batch> = emptyList(),

@@ -16,6 +16,7 @@ import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.ScannedBasket
 import com.kdl.rfidinventory.presentation.ui.theme.BasketStatusColors
+import kotlinx.coroutines.delay
 
 /**
  * 統一的籃子卡片組件
@@ -43,7 +44,22 @@ fun BasketCard(
     val isProductionMode = scannedBasket != null
     val scanCount = scannedBasket?.scanCount ?: 1
 
-    // ⭐ 卡片顏色邏輯
+    // 延遲提交數量更新（避免 ANR）
+    LaunchedEffect(quantityText) {
+        if (quantityText != basket.quantity.toString()) {
+            delay(300)  // 延遲 300ms
+            val newQuantity = quantityText.toIntOrNull()
+            val max = maxCapacity ?: Int.MAX_VALUE
+            if (newQuantity != null && newQuantity in 1..max && newQuantity != basket.quantity) {
+                onQuantityChange(newQuantity)
+                showError = false
+            } else if (quantityText.isNotEmpty()) {
+                showError = true
+            }
+        }
+    }
+
+    // 卡片顏色邏輯
     val cardColors = when {
         // 生產模式：根據掃描次數決定
         isProductionMode && scanCount > 1 -> CardDefaults.cardColors(
@@ -80,12 +96,12 @@ fun BasketCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // ⭐ 收貨模式：狀態錯誤橫幅
+            // 收貨模式：狀態錯誤橫幅
             if (!isProductionMode && !isValidStatus) {
                 StatusErrorBanner(status = basket.status)
             }
 
-            // ⭐ 生產模式：重複掃描提示
+            // 生產模式：重複掃描提示
             if (isProductionMode && scanCount > 1) {
                 DuplicateScanBanner(scanCount = scanCount)
             }
@@ -125,14 +141,14 @@ fun BasketCard(
                 )
             }
 
-            // ⭐ 收貨模式：狀態顯示
+            // 收貨模式：狀態顯示
             if (!isProductionMode) {
                 StatusRow(status = basket.status)
             }
 
             Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // 數量輸入區域
+            // 數量輸入區域（只接受數字）
             QuantityInputSection(
                 quantity = basket.quantity,
                 maxCapacity = maxCapacity,
@@ -141,19 +157,14 @@ fun BasketCard(
                 enabled = isValidStatus || isProductionMode,
                 rssi = scannedBasket?.rssi,
                 onQuantityTextChange = { newValue ->
-                    quantityText = newValue
-                    val newQuantity = newValue.toIntOrNull()
-                    val max = maxCapacity ?: Int.MAX_VALUE
-                    if (newQuantity != null && newQuantity in 1..max) {
-                        onQuantityChange(newQuantity)
-                        showError = false
-                    } else {
-                        showError = true
+                    // 只允許數字輸入
+                    if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                        quantityText = newValue
                     }
                 }
             )
 
-            // ⭐ 生產模式：時間信息
+            // 生產模式：時間信息
             if (isProductionMode && scannedBasket != null) {
                 TimeInfoSection(
                     firstScannedTime = scannedBasket.firstScannedTime,
@@ -269,7 +280,7 @@ private fun BasketHeaderRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                // ⭐ 掃描次數徽章（生產模式）
+                // 掃描次數徽章（生產模式）
                 if (scanCount != null) {
                     ScanCountBadge(count = scanCount)
                 }
@@ -399,12 +410,32 @@ private fun QuantityInputSection(
     rssi: Int?,
     onQuantityTextChange: (String) -> Unit
 ) {
+    // 使用本地狀態緩存輸入
+//    var localQuantityText by remember(quantity) { mutableStateOf(quantity.toString()) }
+//    var localShowError by remember { mutableStateOf(false) }
+//
+//    // 延遲提交更新
+//    LaunchedEffect(localQuantityText) {
+//        delay(500) // 等待 500ms 用戶停止輸入
+//
+//        val newQuantity = localQuantityText.toIntOrNull()
+//        val max = maxCapacity ?: Int.MAX_VALUE
+//
+//        if (newQuantity != null && newQuantity in 1..max) {
+//            if (newQuantity != quantity) {
+//                onQuantityTextChange(localQuantityText)
+//            }
+//            localShowError = false
+//        } else {
+//            localShowError = true
+//        }
+//    }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.Top
     ) {
-        // 數量輸入
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "數量",
@@ -416,7 +447,9 @@ private fun QuantityInputSection(
                 value = quantityText,
                 onValueChange = onQuantityTextChange,
                 modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number  // ⭐ 顯示數字鍵盤
+                ),
                 isError = showError,
                 supportingText = if (showError) {
                     {
@@ -434,7 +467,6 @@ private fun QuantityInputSection(
             )
         }
 
-        // ⭐ RSSI 信號強度（生產模式）
         if (rssi != null) {
             Column {
                 Text(

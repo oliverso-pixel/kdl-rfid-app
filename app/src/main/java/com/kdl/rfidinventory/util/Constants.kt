@@ -2,8 +2,9 @@ package com.kdl.rfidinventory.util
 
 object Constants {
     // API
-    const val BASE_URL = "http://test/api/"
-    const val WEBSOCKET_URL = "ws://test/ws"
+    const val BASE_URL = "http://127.0.0.1/api/"
+    const val DEFAULT_WEBSOCKET_URL = "ws://127.0.0.1/ws"
+    var WEBSOCKET_URL = DEFAULT_WEBSOCKET_URL
 
     // WebSocket
     const val WS_HEARTBEAT_INTERVAL = 30_000L // 30 s
@@ -18,6 +19,8 @@ object Constants {
     // SharedPreferences keys
     const val PREF_NAME = "rfid_inventory_prefs"
     const val PREF_SERVER_URL = "server_url"
+    const val PREF_WEBSOCKET_URL = "websocket_url"
+    const val PREF_ENABLE_WEBSOCKET = "enable_websocket"
     const val PREF_SCAN_TIMEOUT = "scan_timeout"
     const val PREF_AUTO_SYNC = "auto_sync"
 }

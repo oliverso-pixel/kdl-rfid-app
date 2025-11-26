@@ -38,8 +38,9 @@ fun ReceivingScreen(
 
     // ⭐ 計算是否可以提交
     val canSubmit = remember(uiState.scannedBaskets) {
-        uiState.scannedBaskets.isNotEmpty() &&
-                uiState.scannedBaskets.all { it.basket.status == BasketStatus.IN_PRODUCTION }
+//        uiState.scannedBaskets.isNotEmpty() &&
+//                uiState.scannedBaskets.all { it.basket.status == BasketStatus.IN_PRODUCTION }
+        uiState.scannedBaskets.isNotEmpty()
     }
 
     // 錯誤提示
@@ -223,11 +224,13 @@ fun ReceivingScreen(
                     ) { item ->
                         BasketCard(
                             basket = item.basket,
-                            isValidStatus = item.basket.status == BasketStatus.IN_PRODUCTION,
+                            maxCapacity = item.basket.product?.maxBasketCapacity,
                             onQuantityChange = { newQuantity ->
                                 viewModel.updateBasketQuantity(item.basket.uid, newQuantity)
                             },
-                            onRemove = { viewModel.removeBasket(item.basket.uid) }
+                            onRemove = {
+                                viewModel.removeBasket(item.basket.uid)
+                            }
                         )
                     }
                 }

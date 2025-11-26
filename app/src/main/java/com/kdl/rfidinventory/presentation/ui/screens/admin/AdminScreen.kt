@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -171,6 +172,78 @@ fun AdminScreen(
                     onClick = { viewModel.showScanTimeoutDialog() }
                 )
             }
+            // WebSocket 設定區
+            SettingsSection(title = "WebSocket 設定") {
+                // WebSocket 狀態顯示
+                val wsState by viewModel.webSocketState.collectAsStateWithLifecycle()
+                val wsStateText = when (wsState) {
+                    is WebSocketState.Connected -> "✅ 已連接"
+                    is WebSocketState.Connecting -> "🔄 連接中..."
+                    is WebSocketState.Disconnected -> "🔴 已斷開: ${(wsState as? WebSocketState.Disconnected)?.reason ?: ""}"
+                    is WebSocketState.Error -> "❌ 錯誤: ${(wsState as? WebSocketState.Error)?.error ?: ""}"
+                }
+
+                SettingItem(
+                    icon = Icons.Default.Cloud,
+                    title = "WebSocket 狀態",
+                    subtitle = wsStateText,
+                    onClick = null
+                )
+
+                // WebSocket 地址
+                val wsUrl by viewModel.webSocketUrl.collectAsStateWithLifecycle()
+                SettingItem(
+                    icon = Icons.Default.Link,
+                    title = "WebSocket 地址",
+                    subtitle = wsUrl,
+                    onClick = { viewModel.showWebSocketUrlDialog() }
+                )
+
+                // WebSocket 啟用/禁用開關
+                val wsEnabled by viewModel.webSocketEnabled.collectAsStateWithLifecycle()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Power,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column {
+                            Text(
+                                text = "啟用 WebSocket",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = "開啟後將自動連接 WebSocket",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = wsEnabled,
+                        onCheckedChange = { viewModel.toggleWebSocket(it) }
+                    )
+                }
+
+                // 重新連接按鈕
+                SettingItem(
+                    icon = Icons.Default.Refresh,
+                    title = "重新連接",
+                    subtitle = "手動重新連接 WebSocket",
+                    onClick = { viewModel.reconnectWebSocket() },
+                    enabled = wsEnabled
+                )
+            }
             // 資料管理區
             SettingsSection(title = "資料管理") {
                 SettingItem(
@@ -245,6 +318,18 @@ fun AdminScreen(
             onConfirm = { url ->
                 viewModel.updateServerUrl(url)
                 viewModel.dismissServerUrlDialog()
+            }
+        )
+    }
+
+    // WebSocket 地址設定對話框
+    if (uiState.showWebSocketUrlDialog) {
+        WebSocketUrlDialog(
+            currentUrl = viewModel.webSocketUrl.collectAsStateWithLifecycle().value,
+            onDismiss = { viewModel.dismissWebSocketUrlDialog() },
+            onConfirm = { url ->
+                viewModel.updateWebSocketUrl(url)
+                viewModel.dismissWebSocketUrlDialog()
             }
         )
     }
@@ -425,6 +510,75 @@ private fun ServerUrlDialog(
                                 url.isBlank() -> errorMessage = "請輸入伺服器地址"
                                 !url.startsWith("http://") && !url.startsWith("https://") ->
                                     errorMessage = "URL 必須以 http:// 或 https:// 開頭"
+                                else -> onConfirm(url.trim())
+                            }
+                        }
+                    ) {
+                        Text("確認")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebSocketUrlDialog(
+    currentUrl: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var url by remember { mutableStateOf(currentUrl) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "WebSocket 地址",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = {
+                        url = it
+                        errorMessage = null
+                    },
+                    label = { Text("WebSocket URL") },
+                    placeholder = { Text("ws://192.168.1.100/ws") },
+                    isError = errorMessage != null,
+                    supportingText = errorMessage?.let { { Text(it) } },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Text(
+                    text = "格式: ws://主機:端口/路徑 或 wss://主機:端口/路徑",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("取消")
+                    }
+                    Button(
+                        onClick = {
+                            when {
+                                url.isBlank() -> errorMessage = "請輸入 WebSocket 地址"
+                                !url.startsWith("ws://") && !url.startsWith("wss://") ->
+                                    errorMessage = "URL 必須以 ws:// 或 wss:// 開頭"
                                 else -> onConfirm(url.trim())
                             }
                         }
