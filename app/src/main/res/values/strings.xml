@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">RFID Inventory Manager</string>
+
+    <!-- RFID 設置相關 -->
+    <string name="rfid_module_settings">RFID 模組設定</string>
+    <string name="rfid_connection_status">連接狀態</string>
+    <string name="rfid_firmware_version">固件版本</string>
+    <string name="rfid_tx_power">發射功率</string>
+    <string name="rfid_refresh_info">刷新 RFID 信息</string>
+    <string name="rfid_set_power">設置功率</string>
+    <string name="rfid_power_dialog_title">設置發射功率</string>
+    <string name="rfid_power_hint">建議設定範圍: 15-30 dBm\n功率越高，讀取距離越遠，但功耗也越大</string>
+    <string name="rfid_current_power">當前功率: %d dBm</string>
+    <string name="rfid_power_set_success">功率設置成功: %d dBm</string>
+    <string name="rfid_power_set_failed">功率設置失敗</string>
+    <string name="rfid_info_refresh_success">RFID 信息已刷新</string>
+    <string name="rfid_info_refresh_failed">刷新失敗</string>
+</resources>
