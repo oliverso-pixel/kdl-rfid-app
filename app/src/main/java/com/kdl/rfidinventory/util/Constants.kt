@@ -3,15 +3,16 @@ package com.kdl.rfidinventory.util
 object Constants {
     // API
     const val BASE_URL = "http://192.9.204.144:8000/api/v1/"
-    const val DEFAULT_WEBSOCKET_URL = "ws://192.9.204.144:3000/ws"
-    var WEBSOCKET_URL = DEFAULT_WEBSOCKET_URL
+    const val WS_BASE_URL = "ws://192.9.204.144:3001/ws"
+    var WEBSOCKET_URL = WS_BASE_URL
 
     // WebSocket
     const val WS_HEARTBEAT_INTERVAL = 30_000L // 30 s
     const val WS_TIMEOUT = 60_000L // 60 s
+    const val WS_RECONNECT_DELAY = 2_000L          // 重連延遲 2秒
 
     // API Timeout
-    const val API_TIMEOUT = 15_000L // 15 s
+    const val API_TIMEOUT = 30000L
 
     // Database
     const val DATABASE_NAME = "rfid_inventory.db"

@@ -682,8 +682,8 @@ data class AdminUiState(
 )
 
 data class AppSettings(
-    val serverUrl: String = "http://192.168.1.100:8080",
-    val websocketUrl: String = "ws://192.168.1.100/ws",
+    val serverUrl: String = "http://192.9.204.144:8000",
+    val websocketUrl: String = "ws://192.9.204.144:3001/ws",
     val websocketEnabled: Boolean = false,
     val scanTimeoutSeconds: Int = 30,
     val autoSync: Boolean = true,

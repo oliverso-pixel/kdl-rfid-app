@@ -22,6 +22,7 @@ import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 @Composable
 fun MainScreen(
     navController: NavController,
+    onLogout: () -> Unit,
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
@@ -29,12 +30,26 @@ fun MainScreen(
     val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
     val pendingCount by viewModel.pendingOperationsCount.collectAsStateWithLifecycle()
     val webSocketEnabled by viewModel.webSocketEnabled.collectAsStateWithLifecycle()
+    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val showLogoutDialog by viewModel.showLogoutDialog.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
             Column {
                 TopAppBar(
-                    title = { Text("RFID 庫存管理系統") },
+                    title = {
+                        Column {
+                            Text("RFID 庫存管理系統")
+                            // ✅ 显示当前用户
+                            currentUser?.let { user ->
+                                Text(
+                                    text = "${user.name} (${user.role})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                                )
+                            }
+                        }
+                    },
                     actions = {
                         // 連接狀態指示器
                         WebSocketStatusIndicator(
@@ -45,6 +60,14 @@ fun MainScreen(
                             onReconnect = { viewModel.reconnectWebSocket() },
                             onSync = { viewModel.syncPendingOperations() }
                         )
+
+                        IconButton(onClick = { viewModel.showLogoutDialog() }) {
+                            Icon(
+                                Icons.Default.Logout,
+                                contentDescription = "登出",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -164,6 +187,38 @@ fun MainScreen(
                 navController = navController
             )
         }
+    }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissLogoutDialog() },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Logout,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = { Text("確認登出") },
+            text = {
+                Text("確定要登出嗎？")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.logout()
+                        onLogout()
+                    }
+                ) {
+                    Text("確認")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissLogoutDialog() }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 

@@ -29,6 +29,7 @@ fun AdminScreen(
     viewModel: AdminViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+//    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
     val baskets by viewModel.baskets.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -536,7 +537,7 @@ private fun ServerUrlDialog(
                         errorMessage = null
                     },
                     label = { Text("伺服器 URL") },
-                    placeholder = { Text("http://192.168.1.100:8080") },
+                    placeholder = { Text("http://192.9.204.144:8000") },
                     isError = errorMessage != null,
                     supportingText = errorMessage?.let { { Text(it) } },
                     modifier = Modifier.fillMaxWidth(),
@@ -599,7 +600,7 @@ private fun WebSocketUrlDialog(
                         errorMessage = null
                     },
                     label = { Text("WebSocket URL") },
-                    placeholder = { Text("ws://192.168.1.100/ws") },
+                    placeholder = { Text("ws://192.9.204.144:3001/ws") },
                     isError = errorMessage != null,
                     supportingText = errorMessage?.let { { Text(it) } },
                     modifier = Modifier.fillMaxWidth(),

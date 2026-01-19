@@ -23,7 +23,7 @@ class AdminRepository @Inject constructor(
     suspend fun getSettings(): Result<AppSettings> = withContext(Dispatchers.IO) {
         try {
             val settings = AppSettings(
-                serverUrl = "http://192.168.1.100:8080",
+                serverUrl = "http://192.9.204.144:8000",
                 scanTimeoutSeconds = 30,
                 autoSync = true,
                 appVersion = "1.0.0",

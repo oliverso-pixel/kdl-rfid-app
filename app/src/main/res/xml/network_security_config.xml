@@ -10,6 +10,6 @@
         <domain includeSubdomains="true">127.0.0.1</domain>
         <domain includeSubdomains="true">localhost</domain>
         <domain includeSubdomains="true">10.0.2.2</domain> <!-- Android 模擬器的 host IP -->
-        <domain includeSubdomains="true">192.168.1.100</domain> <!-- 替換為你的開發機器 IP -->
+        <domain includeSubdomains="true">192.9.204.144</domain> <!-- 替換為你的開發機器 IP -->
     </domain-config>
 </network-security-config>

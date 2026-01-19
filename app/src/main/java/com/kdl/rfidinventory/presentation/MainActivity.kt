@@ -14,14 +14,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
+import com.kdl.rfidinventory.data.repository.DeviceRepository
 import com.kdl.rfidinventory.data.repository.LoadingRepository
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.presentation.navigation.NavGraph
 import com.kdl.rfidinventory.presentation.ui.screens.splash.SplashScreen
 import com.kdl.rfidinventory.presentation.ui.theme.RFIDInventoryTheme
 import com.kdl.rfidinventory.util.KeyEventHandler
 import com.kdl.rfidinventory.util.barcode.BarcodeScanManager
 import dagger.hilt.android.AndroidEntryPoint
-import jakarta.inject.Inject
+import javax.inject.Inject
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -30,14 +32,28 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var keyEventHandler: KeyEventHandler
+
     @Inject
     lateinit var barcodeScanManager: BarcodeScanManager
+
     @Inject
     lateinit var loadingRepository: LoadingRepository
+
+    @Inject
+    lateinit var deviceRepository: DeviceRepository
+
+    @Inject
+    lateinit var webSocketManager: WebSocketManager
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 📱 啟動時註冊設備
+        lifecycleScope.launch {
+            registerDeviceAndConnect()
+        }
+
         setContent {
             RFIDInventoryTheme {
                 Surface(
@@ -48,9 +64,36 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        // 初始化 Loading Repository
         lifecycleScope.launch {
             loadingRepository.initialize()
         }
+    }
+
+    /**
+     * 註冊設備並連接 WebSocket
+     */
+    private suspend fun registerDeviceAndConnect() {
+        Timber.d("📱 Starting device registration...")
+
+        deviceRepository.registerDevice()
+            .onSuccess { deviceInfo ->
+                Timber.d("✅ Device registered successfully")
+                Timber.d("   Device ID: ${deviceInfo.deviceId}")
+                Timber.d("   Name: ${deviceInfo.name}")
+                Timber.d("   Model: ${deviceInfo.model}")
+                Timber.d("   OS: ${deviceInfo.osVersion}")
+                Timber.d("   IP: ${deviceInfo.ipAddress}")
+
+                // 註冊成功後連接 WebSocket
+                webSocketManager.connect()
+            }
+            .onFailure { error ->
+                Timber.e(error, "❌ Device registration failed")
+                // 即使註冊失敗，也可以嘗試連接 WebSocket（使用本地 Device ID）
+                webSocketManager.connect()
+            }
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
@@ -98,6 +141,8 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         keyEventHandler.reset()
         barcodeScanManager.release()
+        webSocketManager.cleanup()
+        webSocketManager.disconnect()
         Timber.d("🛑 MainActivity destroyed")
     }
 }

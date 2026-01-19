@@ -17,10 +17,12 @@ import com.kdl.rfidinventory.presentation.ui.screens.clear.ClearScreen
 import com.kdl.rfidinventory.presentation.ui.screens.admin.AdminScreen
 import com.kdl.rfidinventory.presentation.ui.screens.admin.BasketManagementScreen
 import com.kdl.rfidinventory.presentation.ui.screens.admin.BasketDetailScreen
+import com.kdl.rfidinventory.presentation.ui.screens.auth.LoginScreen
 import com.kdl.rfidinventory.presentation.ui.screens.loading.LoadingScreen
 import com.kdl.rfidinventory.presentation.ui.screens.shipping.ShippingVerifyScreen
 
 sealed class Screen(val route: String, val title: String) {
+    data object Login : Screen("login", "登錄")
     data object Main : Screen("main", "RFID 庫存管理")
 
     data object Production : Screen("production", "生產模式")
@@ -45,15 +47,40 @@ sealed class Screen(val route: String, val title: String) {
 @Composable
 fun NavGraph(
     navController: NavHostController,
-    startDestination: String = Screen.Main.route
+    startDestination: String = Screen.Login.route
 ) {
     NavHost(
         navController = navController,
         startDestination = startDestination
     ) {
-        composable(Screen.Main.route) {
-            MainScreen(navController = navController)
+        composable(Screen.Login.route) {
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate(Screen.Main.route) {
+                        popUpTo(Screen.Login.route) { inclusive = true }
+                    }
+                }
+            )
         }
+
+        composable(Screen.Main.route) {
+            MainScreen(
+                navController = navController,
+                onLogout = {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+//        composable(Screen.Main.route) {
+//            MainScreen(
+//                navController = navController,
+//                onLogout = TODO(),
+//                viewModel = TODO()
+//            )
+//        }
 
         composable(Screen.Production.route) {
             ProductionScreen(

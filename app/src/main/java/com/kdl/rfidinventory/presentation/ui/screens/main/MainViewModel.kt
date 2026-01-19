@@ -3,8 +3,10 @@ package com.kdl.rfidinventory.presentation.ui.screens.main
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
+import com.kdl.rfidinventory.data.model.User
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
+import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.util.NetworkState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -15,7 +17,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val pendingOperationDao: PendingOperationDao,
-    private val webSocketManager: WebSocketManager
+    private val webSocketManager: WebSocketManager,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     // WebSocket 連接狀態
@@ -51,8 +54,15 @@ class MainViewModel @Inject constructor(
         initialValue = NetworkState.Disconnected(0)
     )
 
+    private val _currentUser = MutableStateFlow<User?>(null)
+    val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
+
+    private val _showLogoutDialog = MutableStateFlow(false)
+    val showLogoutDialog: StateFlow<Boolean> = _showLogoutDialog.asStateFlow()
+
     init {
         Timber.d("📱 MainViewModel initialized")
+        loadCurrentUser()
         observeWebSocketState()
     }
 
@@ -112,9 +122,36 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    // 加載當前用戶
+    private fun loadCurrentUser() {
+        _currentUser.value = authRepository.getCurrentUser()
+    }
+
+    // 顯示登出對話框
+    fun showLogoutDialog() {
+        _showLogoutDialog.value = true
+    }
+
+    // 關閉登出對話框
+    fun dismissLogoutDialog() {
+        _showLogoutDialog.value = false
+    }
+
+    // 登出
+    fun logout() {
+        viewModelScope.launch {
+            authRepository.logout()
+            _showLogoutDialog.value = false
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         // 不要在這裡斷開 WebSocket，因為它是 Singleton
         Timber.d("🧹 MainViewModel cleared")
     }
 }
+
+data class MainUiState(
+    val showLogoutDialog: Boolean = false
+)

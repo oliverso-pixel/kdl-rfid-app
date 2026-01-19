@@ -1,238 +1,288 @@
+// data/remote/websocket/WebSocketManager.kt
 package com.kdl.rfidinventory.data.remote.websocket
 
 import android.content.Context
-import android.content.SharedPreferences
+import com.kdl.rfidinventory.data.local.preferences.PreferencesManager
+import com.kdl.rfidinventory.data.repository.DeviceRepository
 import com.kdl.rfidinventory.util.Constants
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import okhttp3.*
 import timber.log.Timber
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
-sealed class WebSocketState {
-    object Connected : WebSocketState()
-    object Connecting : WebSocketState()
-    data class Disconnected(val reason: String? = null) : WebSocketState()
-    data class Error(val error: String) : WebSocketState()
-}
-
 @Singleton
 class WebSocketManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val deviceRepository: DeviceRepository,
+    private val preferencesManager: PreferencesManager
 ) {
-    private val sharedPreferences: SharedPreferences =
-        context.getSharedPreferences(Constants.PREF_NAME, Context.MODE_PRIVATE)
 
     private var webSocket: WebSocket? = null
-    private var heartbeatJob: Job? = null
-    private var reconnectJob: Job? = null
 
+    private var heartbeatJob: Job? = null
+    private val heartbeatScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .pingInterval(20, TimeUnit.SECONDS)
+        .build()
+
+    // WebSocket 連接狀態
     private val _connectionState = MutableStateFlow<WebSocketState>(WebSocketState.Disconnected())
     val connectionState: StateFlow<WebSocketState> = _connectionState.asStateFlow()
 
-    private val _enableWebSocket = MutableStateFlow(getWebSocketEnabled())
-    val enableWebSocket: StateFlow<Boolean> = _enableWebSocket.asStateFlow()
-
-    private val _websocketUrl = MutableStateFlow(getWebSocketUrl())
+    // WebSocket URL
+    private val _websocketUrl = MutableStateFlow(preferencesManager.getWebSocketUrl())
     val websocketUrl: StateFlow<String> = _websocketUrl.asStateFlow()
 
-    // 關鍵：isOnline 取決於 WebSocket 是否啟用且已連接
-    val isOnline: StateFlow<Boolean> = combine(
-        _connectionState,
-        _enableWebSocket
-    ) { state, enabled ->
-        enabled && state is WebSocketState.Connected
-    }.stateIn(
-        scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
-        started = SharingStarted.Eagerly,
-        initialValue = false
-    )
+    // WebSocket 啟用狀態
+    private val _enableWebSocket = MutableStateFlow(preferencesManager.isWebSocketEnabled())
+    val enableWebSocket: StateFlow<Boolean> = _enableWebSocket.asStateFlow()
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(Constants.WS_TIMEOUT, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .readTimeout(Constants.WS_TIMEOUT, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .writeTimeout(Constants.WS_TIMEOUT, java.util.concurrent.TimeUnit.MILLISECONDS)
-        .build()
+    private val _isOnline = MutableStateFlow(false)
+    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+
+    private var lastPongTime = System.currentTimeMillis()
 
     init {
-        // 監聽 WebSocket 啟用狀態變化
-        CoroutineScope(Dispatchers.IO).launch {
-            _enableWebSocket.collect { enabled ->
-                if (enabled) {
-                    Timber.d("🟢 WebSocket enabled, attempting to connect...")
-                    connect()
-                } else {
-                    Timber.d("🔴 WebSocket disabled, disconnecting...")
-                    disconnect()
-                }
+        // 監聽 WebSocket 狀態變化
+        heartbeatScope.launch {
+            kotlinx.coroutines.flow.combine(
+                _enableWebSocket,
+                _connectionState
+            ) { enabled, state ->
+                enabled && state is WebSocketState.Connected
+            }.collect { online ->
+                _isOnline.value = online
+                Timber.d("📡 isOnline updated: $online")
             }
         }
     }
 
-    private fun getWebSocketEnabled(): Boolean {
-        return sharedPreferences.getBoolean(Constants.PREF_ENABLE_WEBSOCKET, false)
-    }
-
-    private fun getWebSocketUrl(): String {
-        return sharedPreferences.getString(
-            Constants.PREF_WEBSOCKET_URL,
-            Constants.DEFAULT_WEBSOCKET_URL
-        ) ?: Constants.DEFAULT_WEBSOCKET_URL
-    }
-
-    fun setWebSocketEnabled(enabled: Boolean) {
-        sharedPreferences.edit()
-            .putBoolean(Constants.PREF_ENABLE_WEBSOCKET, enabled)
-            .apply()
-        _enableWebSocket.value = enabled
-        Timber.d("🔧 WebSocket enabled set to: $enabled")
-    }
-
-    fun updateWebSocketUrl(url: String) {
-        sharedPreferences.edit()
-            .putString(Constants.PREF_WEBSOCKET_URL, url)
-            .apply()
-        _websocketUrl.value = url
-        Timber.d("🔧 WebSocket URL updated to: $url")
-
-        // 如果啟用且已連接，重新連接
-        if (_enableWebSocket.value && webSocket != null) {
-            CoroutineScope(Dispatchers.IO).launch {
-                disconnect()
-                delay(500)
-                connect()
-            }
-        }
-    }
-
+    /**
+     * 連接 WebSocket
+     */
     fun connect() {
-        // ⭐ 只有啟用時才連接
         if (!_enableWebSocket.value) {
-            Timber.w("⚠️ WebSocket is disabled, skipping connection")
-            _connectionState.value = WebSocketState.Disconnected("WebSocket 已禁用")
+            Timber.w("⚠️ WebSocket is disabled")
             return
         }
 
         if (webSocket != null) {
-            Timber.d("⚠️ WebSocket already connected or connecting")
+            Timber.w("⚠️ WebSocket already connected")
             return
         }
 
-        try {
-            _connectionState.value = WebSocketState.Connecting
+        val deviceId = deviceRepository.getDeviceId()
+        val baseUrl = _websocketUrl.value
+        val url = "$baseUrl?deviceId=$deviceId"
 
-            val url = _websocketUrl.value
-            val request = Request.Builder()
-                .url(url)
-                .build()
+        Timber.d("🔌 Connecting to WebSocket: $url")
+        _connectionState.value = WebSocketState.Connecting
 
-            webSocket = client.newWebSocket(request, object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Timber.d("✅ WebSocket connected")
-                    _connectionState.value = WebSocketState.Connected
-                    startHeartbeat()
-                }
+        val request = Request.Builder()
+            .url(url)
+            .build()
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    Timber.d("📨 Received message: $text")
-                }
+        webSocket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                Timber.d("✅ WebSocket connected")
+                _connectionState.value = WebSocketState.Connected
 
-                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    Timber.d("👋 WebSocket closing: $reason")
-                    webSocket.close(1000, null)
-                }
+                // 連接成功後啟動心跳包
+                startHeartbeat()
+            }
 
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Timber.d("🔌 WebSocket closed: $reason")
-                    _connectionState.value = WebSocketState.Disconnected(reason)
-                    stopHeartbeat()
-                    this@WebSocketManager.webSocket = null
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                // 更新最後收到消息的時間
+                lastPongTime = System.currentTimeMillis()
 
-                    // 只在啟用時自動重連
-                    if (_enableWebSocket.value) {
-                        scheduleReconnect()
-                    }
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Timber.e(t, "❌ WebSocket error")
-                    _connectionState.value = WebSocketState.Error(t.message ?: "Unknown error")
-                    stopHeartbeat()
-                    this@WebSocketManager.webSocket = null
-
-                    // 只在啟用時自動重連
-                    if (_enableWebSocket.value) {
-                        scheduleReconnect()
-                    }
-                }
-            })
-        } catch (e: Exception) {
-            Timber.e(e, "❌ Failed to connect WebSocket")
-            _connectionState.value = WebSocketState.Error(e.message ?: "Connection failed")
-        }
-    }
-
-    fun disconnect() {
-        reconnectJob?.cancel()
-        reconnectJob = null
-        stopHeartbeat()
-
-        webSocket?.let {
-            it.close(1000, "User disconnected")
-            webSocket = null
-        }
-
-        _connectionState.value = WebSocketState.Disconnected("手動斷開")
-        Timber.d("🔌 WebSocket disconnected")
-    }
-
-    private fun startHeartbeat() {
-        heartbeatJob?.cancel()
-        heartbeatJob = CoroutineScope(Dispatchers.IO).launch {
-            while (isActive && webSocket != null) {
+                // 解析消息類型
                 try {
-                    webSocket?.send("ping")
-                    Timber.d("💓 Heartbeat sent")
+                    if (text.contains("\"type\":\"pong\"")) {
+                        Timber.v("💓 Pong received")
+                    }
                 } catch (e: Exception) {
-                    Timber.e(e, "Failed to send heartbeat")
+                    Timber.e(e, "Error parsing message")
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                Timber.d("🔌 WebSocket closing: $code / $reason")
+                _connectionState.value = WebSocketState.Disconnected(reason)
+                stopHeartbeat()
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Timber.d("❌ WebSocket closed: $code / $reason")
+                _connectionState.value = WebSocketState.Disconnected(reason)
+                this@WebSocketManager.webSocket = null
+                stopHeartbeat()
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Timber.e(t, "❌ WebSocket error")
+                _connectionState.value = WebSocketState.Error(t.message ?: "Unknown error")
+                this@WebSocketManager.webSocket = null
+                stopHeartbeat()
+            }
+        })
+    }
+
+    /**
+     * 啟動心跳包
+     */
+    private fun startHeartbeat() {
+        stopHeartbeat()  // 先停止舊的心跳
+
+        heartbeatJob = heartbeatScope.launch {
+            while (isActive) {
+                delay(Constants.WS_HEARTBEAT_INTERVAL)  // 30秒
+
+                if (webSocket == null || _connectionState.value !is WebSocketState.Connected) {
+                    Timber.w("⚠️ WebSocket not connected, stopping heartbeat")
                     break
                 }
-                delay(Constants.WS_HEARTBEAT_INTERVAL)
+
+                // 檢查是否超時
+                val timeSinceLastPong = System.currentTimeMillis() - lastPongTime
+                if (timeSinceLastPong > Constants.WS_TIMEOUT) {
+                    Timber.e("❌ WebSocket timeout (no pong for ${timeSinceLastPong}ms)")
+                    reconnect()
+                    break
+                }
+
+                sendHeartbeat()
             }
+        }
+
+        Timber.d("💓 Heartbeat started (interval: ${Constants.WS_HEARTBEAT_INTERVAL}ms)")
+    }
+
+    /**
+     * 重啟心跳包（接收到消息時調用）
+     */
+    private fun restartHeartbeat() {
+        if (_connectionState.value is WebSocketState.Connected) {
+            startHeartbeat()
         }
     }
 
+    /**
+     * 停止心跳包
+     */
     private fun stopHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = null
+        Timber.d("💓 Heartbeat stopped")
     }
 
-    private fun scheduleReconnect() {
-        if (!_enableWebSocket.value) {
-            Timber.d("⚠️ WebSocket disabled, skipping reconnect")
-            return
-        }
-
-        reconnectJob?.cancel()
-        reconnectJob = CoroutineScope(Dispatchers.IO).launch {
-            delay(5000) // 5 秒後重連
-            if (_enableWebSocket.value) {
-                Timber.d("🔄 Attempting to reconnect...")
-                connect()
+    /**
+     * 發送心跳包
+     */
+    private fun sendHeartbeat() {
+        val deviceId = deviceRepository.getDeviceId()
+        val heartbeatMessage = """
+            {
+                "type": "heartbeat",
+                "deviceId": "$deviceId",
+                "timestamp": ${System.currentTimeMillis()}
             }
+        """.trimIndent()
+
+        val success = webSocket?.send(heartbeatMessage) ?: false
+
+        if (success) {
+            Timber.v("💓 Heartbeat sent")
+        } else {
+            Timber.w("⚠️ Failed to send heartbeat, reconnecting...")
+//            reconnect()
         }
     }
 
-    fun sendMessage(message: String) {
-        if (!_enableWebSocket.value) {
-            Timber.w("⚠️ WebSocket is disabled, cannot send message")
-            return
+    /**
+     * 重新連接
+     */
+    private fun reconnect() {
+        heartbeatScope.launch {
+            disconnect()
+            delay(1000)
+            connect()
         }
+    }
 
-        webSocket?.send(message) ?: run {
+    /**
+     * 發送消息
+     */
+    fun send(message: String): Boolean {
+        return webSocket?.send(message) ?: run {
             Timber.w("⚠️ WebSocket not connected, cannot send message")
+            false
         }
+    }
+
+    /**
+     * 斷開連接
+     */
+    fun disconnect() {
+        stopHeartbeat()  // ✅ 先停止心跳
+        webSocket?.close(1000, "Client disconnecting")
+        webSocket = null
+        _connectionState.value = WebSocketState.Disconnected("Client disconnected")
+        Timber.d("🔌 WebSocket disconnected")
+    }
+
+    /**
+     * 更新 WebSocket URL
+     */
+    fun updateWebSocketUrl(url: String) {
+        _websocketUrl.value = url
+        preferencesManager.setWebSocketUrl(url)
+        Timber.d("🔄 WebSocket URL updated: $url")
+
+        if (webSocket != null) {
+            disconnect()
+            connect()
+        }
+    }
+
+    /**
+     * 設置 WebSocket 啟用狀態
+     */
+    fun setWebSocketEnabled(enabled: Boolean) {
+        _enableWebSocket.value = enabled
+        preferencesManager.setWebSocketEnabled(enabled)
+        Timber.d("🔄 WebSocket enabled: $enabled")
+
+        if (enabled) {
+            connect()
+        } else {
+            disconnect()
+        }
+    }
+
+    /**
+     * ✅ 清理資源
+     */
+    fun cleanup() {
+        stopHeartbeat()
+        heartbeatScope.cancel()
+        disconnect()
+        Timber.d("🧹 WebSocketManager cleaned up")
     }
 }
