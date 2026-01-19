@@ -4,8 +4,10 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kdl.rfidinventory.data.device.DeviceInfoProvider
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
+import com.kdl.rfidinventory.data.local.preferences.PreferencesManager
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.data.repository.AdminRepository
@@ -32,7 +34,9 @@ class AdminViewModel @Inject constructor(
     private val adminRepository: AdminRepository,
     private val pendingOperationDao: PendingOperationDao,
     private val webSocketManager: WebSocketManager,
-    private val rfidManager: RFIDManager
+    private val rfidManager: RFIDManager,
+    private val preferencesManager: PreferencesManager,
+    private val deviceInfoProvider: DeviceInfoProvider
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AdminUiState())
@@ -66,6 +70,7 @@ class AdminViewModel @Inject constructor(
         Timber.d("🎯 AdminViewModel init called (instance: ${this.hashCode()})")
         loadSettings()
         loadRFIDInfo()
+        loadDeviceName()
         observePendingOperations()
         observeLocalBaskets()
 
@@ -204,6 +209,34 @@ class AdminViewModel @Inject constructor(
     /**
      * End of RFID
      */
+
+    private fun loadDeviceName() {
+        val name = deviceInfoProvider.getDeviceName()
+        _uiState.update { it.copy(deviceName = name) }
+    }
+
+    fun showDeviceNameDialog() {
+        _uiState.update { it.copy(showDeviceNameDialog = true) }
+    }
+
+    fun dismissDeviceNameDialog() {
+        _uiState.update { it.copy(showDeviceNameDialog = false) }
+    }
+
+    fun updateDeviceName(name: String) {
+        viewModelScope.launch {
+            if (name.isNotBlank()) {
+                preferencesManager.setCustomDeviceName(name)
+                _uiState.update {
+                    it.copy(
+                        deviceName = name,
+                        successMessage = "設備名稱已更新"
+                    )
+                }
+                // 如果需要，這裡可以觸發重新註冊設備 API
+            }
+        }
+    }
 
     private fun observePendingOperations() {
         viewModelScope.launch {
@@ -677,6 +710,8 @@ data class AdminUiState(
     val showWebSocketUrlDialog: Boolean = false,
     val showScanTimeoutDialog: Boolean = false,
     val showPowerDialog: Boolean = false,
+    val deviceName: String = "",
+    val showDeviceNameDialog: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null
 )

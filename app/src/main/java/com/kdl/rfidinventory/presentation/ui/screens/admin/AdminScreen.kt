@@ -299,6 +299,12 @@ fun AdminScreen(
             }
             // 系統資訊區
             SettingsSection(title = "系統資訊") {
+                SettingItem(
+                    icon = Icons.Default.Edit,
+                    title = "設備名稱",
+                    subtitle = uiState.deviceName,
+                    onClick = { viewModel.showDeviceNameDialog() }
+                )
                 InfoItem(
                     title = "應用程式版本",
                     value = uiState.settings.appVersion
@@ -310,6 +316,19 @@ fun AdminScreen(
                 )
             }
         }
+    }
+
+    if (uiState.showDeviceNameDialog) {
+        TextFieldDialog(
+            title = "修改設備名稱",
+            initialValue = uiState.deviceName,
+            label = "設備名稱",
+            onDismiss = { viewModel.dismissDeviceNameDialog() },
+            onConfirm = { name ->
+                viewModel.updateDeviceName(name)
+                viewModel.dismissDeviceNameDialog()
+            }
+        )
     }
 
     // 清除資料確認對話框
@@ -392,6 +411,41 @@ fun AdminScreen(
             }
         )
     }
+}
+
+@Composable
+fun TextFieldDialog(
+    title: String,
+    initialValue: String,
+    label: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(initialValue) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text(label) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(text) }) {
+                Text("確認")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 @Composable

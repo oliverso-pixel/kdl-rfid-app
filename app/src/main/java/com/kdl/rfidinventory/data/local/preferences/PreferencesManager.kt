@@ -20,6 +20,7 @@ class PreferencesManager @Inject constructor(
         private const val KEY_WEBSOCKET_URL = "websocket_url"
         private const val KEY_WEBSOCKET_ENABLED = "websocket_enabled"
         private const val DEFAULT_WEBSOCKET_URL = "ws://192.9.204.144:3001/ws"
+        private const val KEY_CUSTOM_DEVICE_NAME = "custom_device_name"
     }
 
     // ==================== WebSocket 設置 ====================
@@ -39,5 +40,13 @@ class PreferencesManager @Inject constructor(
 
     fun setWebSocketEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_WEBSOCKET_ENABLED, enabled).apply()
+    }
+
+    fun getCustomDeviceName(): String? {
+        return prefs.getString(KEY_CUSTOM_DEVICE_NAME, null)
+    }
+
+    fun setCustomDeviceName(name: String) {
+        prefs.edit().putString(KEY_CUSTOM_DEVICE_NAME, name).apply()
     }
 }

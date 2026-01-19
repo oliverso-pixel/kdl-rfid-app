@@ -109,6 +109,7 @@ class WebSocketManager @Inject constructor(
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                Timber.d("📩 WebSocket 收到訊息: $text")
                 // 更新最後收到消息的時間
                 lastPongTime = System.currentTimeMillis()
 
@@ -148,7 +149,7 @@ class WebSocketManager @Inject constructor(
      * 啟動心跳包
      */
     private fun startHeartbeat() {
-        stopHeartbeat()  // 先停止舊的心跳
+        stopHeartbeat()
 
         heartbeatJob = heartbeatScope.launch {
             while (isActive) {
@@ -160,12 +161,12 @@ class WebSocketManager @Inject constructor(
                 }
 
                 // 檢查是否超時
-                val timeSinceLastPong = System.currentTimeMillis() - lastPongTime
-                if (timeSinceLastPong > Constants.WS_TIMEOUT) {
-                    Timber.e("❌ WebSocket timeout (no pong for ${timeSinceLastPong}ms)")
-                    reconnect()
-                    break
-                }
+//                val timeSinceLastPong = System.currentTimeMillis() - lastPongTime
+//                if (timeSinceLastPong > Constants.WS_TIMEOUT) {
+//                    Timber.e("❌ WebSocket timeout (no pong for ${timeSinceLastPong}ms)")
+//                    reconnect()
+//                    break
+//                }
 
                 sendHeartbeat()
             }
@@ -201,6 +202,7 @@ class WebSocketManager @Inject constructor(
             {
                 "type": "heartbeat",
                 "deviceId": "$deviceId",
+                "message": "ping",
                 "timestamp": ${System.currentTimeMillis()}
             }
         """.trimIndent()
@@ -240,7 +242,7 @@ class WebSocketManager @Inject constructor(
      * 斷開連接
      */
     fun disconnect() {
-        stopHeartbeat()  // ✅ 先停止心跳
+        stopHeartbeat()  // 先停止心跳
         webSocket?.close(1000, "Client disconnecting")
         webSocket = null
         _connectionState.value = WebSocketState.Disconnected("Client disconnected")

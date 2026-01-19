@@ -110,9 +110,10 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideDeviceInfoProvider(
-        @ApplicationContext context: Context
+        @ApplicationContext context: Context,
+        preferencesManager: PreferencesManager
     ): DeviceInfoProvider {
-        return DeviceInfoProvider(context)
+        return DeviceInfoProvider(context, preferencesManager)
     }
 
     @Provides

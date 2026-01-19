@@ -3,6 +3,7 @@ package com.kdl.rfidinventory.data.repository
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.remote.dto.response.BasketResponse
 import com.kdl.rfidinventory.data.model.*
+import com.kdl.rfidinventory.data.remote.dto.response.ApiBasketDto
 import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -11,6 +12,28 @@ import timber.log.Timber
 val json = Json {
     ignoreUnknownKeys = true
     isLenient = true
+}
+
+fun ApiBasketDto.toEntity(): BasketEntity {
+    return BasketEntity(
+        uid = rfid,
+        productId = product,
+        productName = null, // API 目前可能只回傳 ID
+        batchId = batch,
+        warehouseId = warehouseId,
+        productJson = null,
+        batchJson = null,
+        quantity = quantity ?: 0,
+        status = try {
+            BasketStatus.valueOf(status)
+        } catch (e: Exception) {
+            BasketStatus.UNASSIGNED
+        },
+        productionDate = null,
+        expireDate = null,
+        lastUpdated = System.currentTimeMillis(),
+        updateBy = updateBy
+    )
 }
 
 // BasketEntity 轉 Basket

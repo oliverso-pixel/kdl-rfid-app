@@ -6,6 +6,7 @@ import android.media.MediaDrm
 import android.os.Build
 import android.provider.Settings
 import com.kdl.rfidinventory.BuildConfig
+import com.kdl.rfidinventory.data.local.preferences.PreferencesManager
 import com.kdl.rfidinventory.data.model.DeviceInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
@@ -16,7 +17,8 @@ import javax.inject.Singleton
 
 @Singleton
 class DeviceInfoProvider @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val preferencesManager: PreferencesManager
 ) {
 
     /**
@@ -29,11 +31,9 @@ class DeviceInfoProvider @Inject constructor(
             val deviceId = mediaDrm.getPropertyByteArray(MediaDrm.PROPERTY_DEVICE_UNIQUE_ID)
             mediaDrm.release()
 
-            // 轉換為 Hex String
             deviceId.joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
             Timber.e(e, "Failed to get MediaDrm ID, using Android ID as fallback")
-            // Fallback: 使用 Android ID
             Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
         }
     }
@@ -42,7 +42,7 @@ class DeviceInfoProvider @Inject constructor(
      * 獲取設備名稱
      */
     fun getDeviceName(): String {
-        return "Warehouse Scanner ${Build.MODEL}"
+        return preferencesManager.getCustomDeviceName() ?: "Warehouse Scanner ${Build.MODEL}"
     }
 
     /**

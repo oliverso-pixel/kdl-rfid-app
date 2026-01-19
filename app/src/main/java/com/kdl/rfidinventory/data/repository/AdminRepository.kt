@@ -5,6 +5,7 @@ import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.remote.api.ApiService
 import com.kdl.rfidinventory.data.remote.api.RegisterBasketRequest
+import com.kdl.rfidinventory.data.remote.dto.request.CreateBasketRequest
 import com.kdl.rfidinventory.presentation.ui.screens.admin.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -53,86 +54,64 @@ class AdminRepository @Inject constructor(
                 }
 
                 if (isOnline) {
-                    // Online：先檢查 API
                     try {
-                        val checkResponse = apiService.checkBasketRegistration(uid)
+                        val getResponse = apiService.getBasketByRfid(uid)
 
-                        if (checkResponse.success && checkResponse.data != null) {
-                            val checkResult = checkResponse.data
-
-//                            if (checkResult.isRegistered) {
-//                                // 已在服務器註冊，同步到本地
-//                                val basket = BasketEntity(
-//                                    uid = uid,
-//                                    productID = checkResult.productID,
-//                                    productName = checkResult.productName,
-//                                    batchId = checkResult.batchId,
-//                                    quantity = checkResult.quantity ?: 0,
-//                                    status = when (checkResult.status) {
-//                                        "UNASSIGNED" -> BasketStatus.UNASSIGNED
-//                                        "IN_PRODUCTION" -> BasketStatus.IN_PRODUCTION
-//                                        "RECEIVED" -> BasketStatus.RECEIVED
-//                                        "IN_STOCK" -> BasketStatus.IN_STOCK
-//                                        "SHIPPED" -> BasketStatus.SHIPPED
-//                                        "SAMPLING" -> BasketStatus.SAMPLING
-//                                        else -> BasketStatus.UNASSIGNED
-//                                    },
-//                                    productionDate = null,
-//                                    lastUpdated = System.currentTimeMillis()
-//                                )
-//                                database.basketDao().insertBasket(basket)
-//
-//                                return@withContext Result.success(
-//                                    RegisterBasketResult.AlreadyRegisteredOnServer(basket)
-//                                )
-//                            }
-                        }
-                    } catch (e: Exception) {
-                        Timber.e(e, "Failed to check basket on server")
-                        // API 調用失敗，降級為離線模式
-                        return@withContext registerBasketOffline(uid)
-                    }
-
-                    // 未註冊，註冊到服務器
-                    try {
-                        val registerResponse = apiService.registerBasket(
-                            RegisterBasketRequest(
-                                uid = uid,
-                                registeredAt = System.currentTimeMillis()
-                            )
-                        )
-
-                        if (registerResponse.success) {
-                            // 同時保存到本地
-                            val responseData = registerResponse.data
-                            val basket = BasketEntity(
-                                uid = uid,
-                                productId = null,
-                                productName = null,
-                                batchId = null,
-                                warehouseId = null,
-                                productJson = null,
-                                batchJson = null,
-                                quantity = 0,
-                                status = BasketStatus.UNASSIGNED,
-                                productionDate = null,
-                                expireDate = null,
-                                lastUpdated = System.currentTimeMillis(),
-                                updateBy = null,
-                            )
-                            database.basketDao().insertBasket(basket)
+                        if (getResponse.isSuccessful && getResponse.body() != null) {
+                            // 2a. 伺服器已存在 -> 同步到本地
+                            val apiBasket = getResponse.body()!!
+                            val entity = apiBasket.toEntity()
+                            database.basketDao().insertBasket(entity)
 
                             return@withContext Result.success(
-                                RegisterBasketResult.RegisteredSuccessfully(basket)
+                                RegisterBasketResult.AlreadyRegisteredOnServer(entity)
                             )
+                        } else if (getResponse.code() == 404) {
+                            // 2b. 伺服器不存在 (404) -> 呼叫 POST 註冊
+                            val createRequest = CreateBasketRequest(
+                                rfid = uid,
+                                type = 1,
+                                description = "Register from App"
+                            )
+                            val createResponse = apiService.createBasket(createRequest)
+
+                            if (createResponse.isSuccessful) {
+                                // 註冊成功 -> 寫入本地
+                                val newBasket = BasketEntity(
+                                    uid = uid,
+                                    productId = null,
+                                    productName = null,
+                                    batchId = null,
+                                    warehouseId = null,
+                                    productJson = null,
+                                    batchJson = null,
+                                    quantity = 0,
+                                    status = BasketStatus.UNASSIGNED,
+                                    productionDate = null,
+                                    expireDate = null,
+                                    lastUpdated = System.currentTimeMillis(),
+                                    updateBy = "app"
+                                )
+                                database.basketDao().insertBasket(newBasket)
+                                return@withContext Result.success(
+                                    RegisterBasketResult.RegisteredSuccessfully(newBasket)
+                                )
+                            } else {
+                                // 註冊失敗 (可能是 400 Already Exists 或其他錯誤)
+                                val errorBody = createResponse.errorBody()?.string()
+                                return@withContext Result.failure(
+                                    Exception("註冊失敗: ${createResponse.code()} - $errorBody")
+                                )
+                            }
                         } else {
+                            // 其他 API 錯誤
                             return@withContext Result.failure(
-                                Exception("註冊失敗: ${registerResponse.message ?: "未知錯誤"}")
+                                Exception("檢查籃子失敗: ${getResponse.code()}")
                             )
                         }
                     } catch (e: Exception) {
-                        Timber.e(e, "Failed to register basket on server")
-                        // 註冊失敗，降級為離線模式
+                        Timber.e(e, "API Error")
+                        // 網路連線錯誤，降級為離線
                         return@withContext registerBasketOffline(uid)
                     }
                 } else {
