@@ -60,7 +60,7 @@ class AdminRepository @Inject constructor(
                         if (getResponse.isSuccessful && getResponse.body() != null) {
                             // 2a. 伺服器已存在 -> 同步到本地
                             val apiBasket = getResponse.body()!!
-                            val entity = apiBasket.toEntity()
+                            val entity = apiBasket.toBasket().toEntity()
                             database.basketDao().insertBasket(entity)
 
                             return@withContext Result.success(

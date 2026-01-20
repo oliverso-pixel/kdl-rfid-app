@@ -12,7 +12,6 @@ import com.kdl.rfidinventory.data.remote.dto.request.ShippingRequest
 import com.kdl.rfidinventory.data.remote.dto.request.SyncRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateSettingsRequest
-import com.kdl.rfidinventory.data.remote.dto.response.ApiBasketDto
 import com.kdl.rfidinventory.data.remote.dto.response.ApiResponse
 import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
 import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
@@ -59,7 +58,7 @@ interface ApiService {
     // 籃子查詢：GET /api/v1/baskets/{rfid}
     // 注意：這裡不使用 ApiResponse 包裝，因為 curl 顯示直接回傳 JSON 物件或 {"detail":...}
     @GET("baskets/{rfid}")
-    suspend fun getBasketByRfid(@Path("rfid") rfid: String): retrofit2.Response<ApiBasketDto>
+    suspend fun getBasketByRfid(@Path("rfid") rfid: String): retrofit2.Response<BasketDetailResponse>
 
     // 籃子註冊：POST /api/v1/baskets/
     @POST("baskets/")

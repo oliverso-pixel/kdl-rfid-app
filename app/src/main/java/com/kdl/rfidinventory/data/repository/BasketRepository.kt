@@ -45,34 +45,36 @@ class BasketRepository @Inject constructor(
             if (isOnline) {
                 // 在線：從服務器檢查
                 Timber.d("🌐 Online: Validating basket from server: $uid")
-                val response = apiService.scanBasket(ScanRequest(uid))
+                val response = apiService.getBasketByRfid(uid)
 
-                if (response.success && response.data != null) {
-                    val basket = response.data.toBasket()
+                if (response.isSuccessful && response.body() != null) {
+                    val apiBasketDto = response.body()!!
+                    // 這裡使用 apiBasketDto (ApiBasketDto) 或 BasketDetailResponse 進行轉換
+                    // 假設 ApiService 回傳的是 BasketDetailResponse (根據上面的定義)
+                    val basket = apiBasketDto.toBasket()
 
-                    // 檢查狀態
+                    // 更新本地緩存
+                    basketDao.insertBasket(basket.toEntity())
+
                     when (basket.status) {
                         BasketStatus.UNASSIGNED -> {
-                            Timber.d("✅ Basket is valid: $uid (UNASSIGNED)")
-                            // 更新本地數據庫
-                            basketDao.insertBasket(basket.toEntity())
+                            Timber.d("✅ Basket valid: $uid")
                             BasketValidationResult.Valid(basket)
                         }
+                        // 如果狀態是 IN_PRODUCTION，代表已被佔用
                         BasketStatus.IN_PRODUCTION -> {
-                            Timber.w("⚠️ Basket is already in production: $uid")
-                            basketDao.insertBasket(basket.toEntity())
+                            Timber.w("⚠️ Basket occupied: $uid")
                             BasketValidationResult.AlreadyInProduction(basket)
                         }
                         else -> {
-                            Timber.w("⚠️ Basket has invalid status: $uid (${basket.status})")
-                            basketDao.insertBasket(basket.toEntity())
                             BasketValidationResult.InvalidStatus(basket, basket.status)
                         }
                     }
-                } else {
-                    // 服務器沒有這個籃子記錄
-                    Timber.w("⚠️ Basket not registered on server: $uid")
+                } else if (response.code() == 404) {
+                    // 404 代表籃子不存在，視為未註冊
                     BasketValidationResult.NotRegistered(uid)
+                } else {
+                    BasketValidationResult.Error("API Error: ${response.code()}")
                 }
             } else {
                 // 離線：從本地數據庫檢查

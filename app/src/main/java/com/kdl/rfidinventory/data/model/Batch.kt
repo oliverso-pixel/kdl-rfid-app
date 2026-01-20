@@ -13,6 +13,7 @@ data class Batch(
     val totalQuantity: Int,
     val remainingQuantity: Int,
     val productionDate: String,
+    val expireDate: String? = null
 ) {
     /**
      * 是否還有剩余數量
