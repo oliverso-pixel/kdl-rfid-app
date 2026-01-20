@@ -5,6 +5,8 @@ import com.kdl.rfidinventory.data.remote.dto.response.BasketResponse
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.dto.response.ApiBasketDto
 import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
+import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
+import com.kdl.rfidinventory.data.remote.dto.response.ProductionBatchResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import timber.log.Timber
@@ -18,7 +20,7 @@ fun ApiBasketDto.toEntity(): BasketEntity {
     return BasketEntity(
         uid = rfid,
         productId = product,
-        productName = null, // API 目前可能只回傳 ID
+        productName = null,
         batchId = batch,
         warehouseId = warehouseId,
         productJson = null,
@@ -35,6 +37,77 @@ fun ApiBasketDto.toEntity(): BasketEntity {
         updateBy = updateBy
     )
 }
+
+// DailyProductResponse -> Product
+fun DailyProductResponse.toProduct(): Product {
+    return Product(
+        id = this.itemCode,
+        barcodeId = this.barcodeId?.toLongOrNull(),
+        qrcodeId = this.qrcodeId,
+        name = this.name,
+        maxBasketCapacity = this.maxBasketCapacity,
+        imageUrl = this.imageUrl
+    )
+}
+
+// ProductionBatchResponse -> Batch
+fun ProductionBatchResponse.toBatch(): Batch {
+    return Batch(
+        id = this.batchCode,
+        productId = this.itemCode,
+        totalQuantity = this.totalQuantity,
+        remainingQuantity = this.remainingQuantity,
+        productionDate = this.productionDate ?: ""
+    )
+}
+
+//fun BasketDetailResponse.toBasket(): Basket {
+//    // 1. 解析 Product JSON String
+//    val parsedProduct = product?.let { jsonString ->
+//        if (jsonString.isBlank() || jsonString == "\"\"") return@let null
+//        try {
+//            // 這裡假設 product JSON 結構與 DailyProductResponse 類似
+//            // 根據 curl: {"itemcode": "...", "barcodeId": "...", ...}
+//            val dto = json.decodeFromString<DailyProductResponse>(jsonString)
+//            dto.toProduct()
+//        } catch (e: Exception) {
+//            Timber.e(e, "Failed to parse product json string: $jsonString")
+//            null
+//        }
+//    }
+//
+//    // 2. 解析 Batch JSON String
+//    val parsedBatch = batch?.let { jsonString ->
+//        if (jsonString.isBlank() || jsonString == "\"\"") return@let null
+//        try {
+//            // 根據 curl: {"batch_code": "...", "itemcode": "...", ...}
+//            val dto = json.decodeFromString<ProductionBatchResponse>(jsonString)
+//            dto.toBatch()
+//        } catch (e: Exception) {
+//            Timber.e(e, "Failed to parse batch json string: $jsonString")
+//            null
+//        }
+//    }
+//
+//    return Basket(
+//        uid = rfid,
+//        product = parsedProduct,
+//        batch = parsedBatch,
+//        warehouseId = warehouseId,
+//        quantity = quantity,
+//        status = try {
+//            BasketStatus.valueOf(status)
+//        } catch (e: Exception) {
+//            BasketStatus.UNASSIGNED
+//        },
+//        productionDate = parsedBatch?.productionDate,
+//        expireDate = parsedBatch?.expireDate,
+//        lastUpdated = System.currentTimeMillis(),
+//        updateBy = updateBy
+//    )
+//}
+
+//＋＋＋＋＋＋＋＋＋
 
 // BasketEntity 轉 Basket
 fun BasketEntity.toBasket(): Basket {

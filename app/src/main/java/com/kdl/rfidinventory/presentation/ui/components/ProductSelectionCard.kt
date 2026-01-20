@@ -28,6 +28,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.kdl.rfidinventory.data.model.Product
+import com.kdl.rfidinventory.util.Constants
 import timber.log.Timber
 
 /**
@@ -54,9 +55,13 @@ fun ProductSelectionCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (selectedProduct != null) {
+                val imageUrl = selectedProduct.imageUrl?.let { url ->
+                    if (url.startsWith("http")) url else "${Constants.SERVER_URL}$url"
+                }
+
                 // 已選擇產品
                 AsyncImage(
-                    model = selectedProduct.imageUrl,
+                    model = imageUrl,
                     contentDescription = selectedProduct.name,
                     modifier = Modifier
                         .size(60.dp)
@@ -507,9 +512,13 @@ private fun ProductItem(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val imageUrl = product.imageUrl?.let { url ->
+                if (url.startsWith("http")) url else "${Constants.SERVER_URL}$url"
+            }
+
             // 產品圖片
             AsyncImage(
-                model = product.imageUrl,
+                model = imageUrl,
                 contentDescription = product.name,
                 modifier = Modifier
                     .size(60.dp)

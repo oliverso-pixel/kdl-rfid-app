@@ -62,9 +62,6 @@ class ProductionViewModel @Inject constructor(
         observeNetworkState()
     }
 
-    /**
-     *  TODO : get by API
-     */
     private fun loadProducts() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
@@ -72,10 +69,10 @@ class ProductionViewModel @Inject constructor(
                 .onSuccess { orders ->
                     val products = orders.map { order ->
                         Product(
-                            id = order.productId,
+                            id = order.id,
                             barcodeId = order.barcodeId,
                             qrcodeId = order.qrcodeId,
-                            name = order.productName,
+                            name = order.name,
                             maxBasketCapacity = order.maxBasketCapacity,
                             imageUrl = order.imageUrl
                         )
@@ -235,89 +232,52 @@ class ProductionViewModel @Inject constructor(
         loadBatchesForProduct(product.id)
     }
 
-    /**
-     *  TODO : get by API
-     */
     @RequiresApi(Build.VERSION_CODES.O)
     private fun loadBatchesForProduct(productId: String) {
         // 使用 mockBatches() 函數並過濾對應的 productId
-        val allBatches = mockBatches(productId)
-        val filteredBatches = allBatches.filter { it.productId == productId }
-
-        Timber.d("📦 Loading batches for product: $productId, found: ${filteredBatches.size}")
-
-        _uiState.update {
-            it.copy(
-                batches = filteredBatches,
-                showBatchDialog = true
-            )
-        }
-
-        // 如果只有一個批次，自動選擇
-        if (filteredBatches.size == 1) {
-            Timber.d("🎯 Auto-selecting single batch: ${filteredBatches.first().id}")
-            viewModelScope.launch {
-                kotlinx.coroutines.delay(300)
-                selectBatch(filteredBatches.first())
-            }
-        }
-
-//        // 獲取該產品的所有批次
-//        val batches = mockBatches(productId)
+//        val allBatches = mockBatches(productId)
+//        val filteredBatches = allBatches.filter { it.productId == productId }
 //
-//        Timber.d("📦 Loading batches for product: $productId")
-//        Timber.d("   Found ${batches.size} batch(es)")
-//        batches.forEach { batch ->
-//            Timber.d("   - ${batch.id}: ${batch.remainingQuantity}/${batch.totalQuantity}")
-//        }
+//        Timber.d("📦 Loading batches for product: $productId, found: ${filteredBatches.size}")
 //
-//        // 檢查是否有可用批次
-//        if (batches.isEmpty()) {
-//            Timber.w("⚠️ No batches available for product: $productId")
-//            _uiState.update {
-//                it.copy(
-//                    error = "產品「${_uiState.value.selectedProduct?.name ?: productId}」沒有可用的批次",
-//                    showBatchDialog = false,
-//                    batches = emptyList()
-//                )
-//            }
-//            return
-//        }
-//
-//        // 檢查是否有剩余數量
-//        val availableBatches = batches.filter { it.hasRemainingQuantity() }
-//        if (availableBatches.isEmpty()) {
-//            Timber.w("⚠️ All batches for product $productId are depleted")
-//            _uiState.update {
-//                it.copy(
-//                    error = "產品「${_uiState.value.selectedProduct?.name ?: productId}」的所有批次都已用完",
-//                    showBatchDialog = false,
-//                    batches = batches  // 仍然顯示批次，但用戶會看到剩余數量為0
-//                )
-//            }
-//            return
-//        }
-//
-//        // 更新狀態
 //        _uiState.update {
 //            it.copy(
-//                batches = batches,  // 已經按剩余數量排序
-//                showBatchDialog = true,
-//                error = null
+//                batches = filteredBatches,
+//                showBatchDialog = true
 //            )
 //        }
 //
-//        // 如果只有一個可用批次，自動選擇
-//        if (availableBatches.size == 1) {
-//            val batch = availableBatches.first()
-//            Timber.d("🎯 Auto-selecting single available batch: ${batch.id}")
+//        // 如果只有一個批次，自動選擇
+//        if (filteredBatches.size == 1) {
+//            Timber.d("🎯 Auto-selecting single batch: ${filteredBatches.first().id}")
 //            viewModelScope.launch {
 //                kotlinx.coroutines.delay(300)
-//                selectBatch(batch)
+//                selectBatch(filteredBatches.first())
 //            }
-//        } else {
-//            Timber.d("📋 Multiple batches available, showing selection dialog")
 //        }
+        viewModelScope.launch {
+            // 使用 API 獲取當日批次
+            productionRepository.getBatchesForDate()
+                .onSuccess { allBatches ->
+                    // 過濾出當前產品的批次
+                    val filteredBatches = allBatches.filter { it.productId == productId }
+
+                    _uiState.update {
+                        it.copy(
+                            batches = filteredBatches,
+                            showBatchDialog = true
+                        )
+                    }
+
+                    // 自動選擇邏輯...
+                    if (filteredBatches.size == 1) {
+                        selectBatch(filteredBatches.first())
+                    }
+                }
+                .onFailure {
+                    _uiState.update { it.copy(error = "獲取批次失敗: ${it}") }
+                }
+        }
     }
 
     fun selectBatch(batch: Batch) {

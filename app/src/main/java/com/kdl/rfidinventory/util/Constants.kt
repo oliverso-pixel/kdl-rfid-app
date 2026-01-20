@@ -11,6 +11,9 @@ object Constants {
     const val WS_TIMEOUT = 60_000L // 60 s
     const val WS_RECONNECT_DELAY = 2_000L          // 重連延遲 2秒
 
+    // imageUrl
+    const val SERVER_URL = "http://192.9.204.144:8000"
+
     // API Timeout
     const val API_TIMEOUT = 30000L
 

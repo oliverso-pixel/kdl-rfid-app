@@ -11,4 +11,16 @@ data class BasketDetailResponse(
     val expireDate: String?,
     val lastUpdated: Long,
     val updateBy: String?
+
+//    val rfid: String,
+//    val type: Int,
+//    val description: String?,
+//    val bid: Int?,
+//    val status: String,
+//    val quantity: Int,
+//    val warehouseId: String?,
+//    val product: String?,
+//    val batch: String?,
+//    val lastUpdated: String?,
+//    val updateBy: String?
 )
