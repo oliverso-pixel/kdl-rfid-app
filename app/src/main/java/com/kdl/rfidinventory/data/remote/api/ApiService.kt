@@ -1,6 +1,7 @@
 package com.kdl.rfidinventory.data.remote.api
 
 import com.kdl.rfidinventory.data.remote.dto.request.BindBasketRequest
+import com.kdl.rfidinventory.data.remote.dto.request.BulkUpdateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.ClearRequest
 import com.kdl.rfidinventory.data.remote.dto.request.CreateBasketRequest
 import com.kdl.rfidinventory.data.remote.dto.request.ProductionStartRequest
@@ -15,6 +16,7 @@ import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketStatusRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateSettingsRequest
 import com.kdl.rfidinventory.data.remote.dto.response.ApiResponse
 import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
+import com.kdl.rfidinventory.data.remote.dto.response.BulkUpdateResponse
 import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
 import com.kdl.rfidinventory.data.remote.dto.response.GenericResponse
 import com.kdl.rfidinventory.data.remote.dto.response.ProductDetailResponse
@@ -77,7 +79,12 @@ interface ApiService {
     @POST("baskets/")
     suspend fun createBasket(@Body request: CreateBasketRequest): retrofit2.Response<GenericResponse>
 
-
+    // ==================== baskets API ====================
+    // 通用批量更新接口 (用於 Clear, Transfer, Production 等)
+    @PUT("baskets/bulk-update")
+    suspend fun bulkUpdateBaskets(
+        @Body request: BulkUpdateRequest
+    ): retrofit2.Response<BulkUpdateResponse>
 
 
 

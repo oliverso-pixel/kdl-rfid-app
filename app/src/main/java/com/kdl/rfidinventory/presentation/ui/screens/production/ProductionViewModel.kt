@@ -13,6 +13,7 @@ import com.kdl.rfidinventory.data.repository.ProductionRepository
 import com.kdl.rfidinventory.util.rfid.RFIDTag
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -302,82 +303,119 @@ class ProductionViewModel @Inject constructor(
             return
         }
 
-        // 開始驗證
         viewModelScope.launch {
             validatingUids.add(uid)
             _uiState.update { it.copy(isValidating = true) }
 
-            val online = isOnline.value
-            Timber.d("🌐 Validating basket - isOnline: $online")
-            val validationResult = basketRepository.validateBasketForProduction(uid, online)
+//            val online = isOnline.value
+//            Timber.d("🌐 Validating basket - isOnline: $online")
+//            val validationResult = basketRepository.validateBasketForProduction(uid, online)
+//
+//            when (validationResult) {
+//                is BasketValidationResult.Valid -> {
+//                    Timber.d("✅ Basket validated successfully: $uid")
+//                    addNewBasket(uid, rssi, validationResult.basket)
+//                }
+//
+//                is BasketValidationResult.NotRegistered -> {
+//                    Timber.w("⚠️ Basket not registered: $uid")
+//                    _uiState.update {
+//                        it.copy(
+//                            error = "籃子 ${uid.takeLast(8)} 尚未登記，請先在「籃子管理」中登記此籃子",
+//                            isValidating = false
+//                        )
+//                    }
+//                    // 單次模式停止掃描
+//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+//                        scanManager.stopScanning()
+//                    }
+//                }
+//
+//                is BasketValidationResult.InvalidStatus -> {
+//                    Timber.w("⚠️ Basket has invalid status: $uid (${validationResult.currentStatus})")
+//                    val statusText = getBasketStatusText(validationResult.currentStatus)
+//                    _uiState.update {
+//                        it.copy(
+//                            error = "籃子 ${uid.takeLast(8)} 狀態為「${statusText}」，無法用於生產",
+//                            isValidating = false
+//                        )
+//                    }
+//                    // 單次模式停止掃描
+//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+//                        scanManager.stopScanning()
+//                    }
+//                }
+//
+//                is BasketValidationResult.AlreadyInProduction -> {
+//                    Timber.w("⚠️ Basket is already in production: $uid")
+//                    _uiState.update {
+//                        it.copy(
+//                            error = "籃子 ${uid.takeLast(8)} 已在生產中，無法重複使用",
+//                            isValidating = false
+//                        )
+//                    }
+//                    // 單次模式停止掃描
+//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+//                        scanManager.stopScanning()
+//                    }
+//                }
+//
+//                is BasketValidationResult.Error -> {
+//                    Timber.e("❌ Basket validation error: $uid - ${validationResult.message}")
+//                    _uiState.update {
+//                        it.copy(
+//                            error = "驗證籃子失敗: ${validationResult.message}",
+//                            isValidating = false
+//                        )
+//                    }
+//                    // 單次模式停止掃描
+//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+//                        scanManager.stopScanning()
+//                    }
+//                }
+//            }
+//
+//            // 移除驗證標記
+//            kotlinx.coroutines.delay(500)
+//            validatingUids.remove(uid)
 
-            when (validationResult) {
-                is BasketValidationResult.Valid -> {
-                    Timber.d("✅ Basket validated successfully: $uid")
-                    addNewBasket(uid, rssi, validationResult.basket)
+            basketRepository.fetchBasket(uid, isOnline.value)
+                .onSuccess { basket ->
+                    when (basket.status) {
+                        BasketStatus.UNASSIGNED -> {
+                            Timber.d("✅ Basket valid for production: $uid")
+                            addNewBasket(uid, rssi, basket)
+                        }
+                        BasketStatus.IN_PRODUCTION -> {
+                            _uiState.update {
+                                it.copy(error = "籃子已在生產中 (批次: ${basket.batch?.id})")
+                            }
+                        }
+                        else -> {
+                            val statusText = getBasketStatusText(basket.status)
+                            _uiState.update {
+                                it.copy(error = "籃子狀態錯誤: $statusText (需為未配置)")
+                            }
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    val msg = if (error.message == "BASKET_NOT_REGISTERED" ||
+                        error.message == "BASKET_NOT_FOUND_LOCAL") {
+                        "籃子尚未登記，請先至管理介面登記"
+                    } else {
+                        "讀取失敗: ${error.message}"
+                    }
+                    _uiState.update { it.copy(error = msg) }
                 }
 
-                is BasketValidationResult.NotRegistered -> {
-                    Timber.w("⚠️ Basket not registered: $uid")
-                    _uiState.update {
-                        it.copy(
-                            error = "籃子 ${uid.takeLast(8)} 尚未登記，請先在「籃子管理」中登記此籃子",
-                            isValidating = false
-                        )
-                    }
-                    // 單次模式停止掃描
-                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                        scanManager.stopScanning()
-                    }
-                }
-
-                is BasketValidationResult.InvalidStatus -> {
-                    Timber.w("⚠️ Basket has invalid status: $uid (${validationResult.currentStatus})")
-                    val statusText = getBasketStatusText(validationResult.currentStatus)
-                    _uiState.update {
-                        it.copy(
-                            error = "籃子 ${uid.takeLast(8)} 狀態為「${statusText}」，無法用於生產",
-                            isValidating = false
-                        )
-                    }
-                    // 單次模式停止掃描
-                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                        scanManager.stopScanning()
-                    }
-                }
-
-                is BasketValidationResult.AlreadyInProduction -> {
-                    Timber.w("⚠️ Basket is already in production: $uid")
-                    _uiState.update {
-                        it.copy(
-                            error = "籃子 ${uid.takeLast(8)} 已在生產中，無法重複使用",
-                            isValidating = false
-                        )
-                    }
-                    // 單次模式停止掃描
-                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                        scanManager.stopScanning()
-                    }
-                }
-
-                is BasketValidationResult.Error -> {
-                    Timber.e("❌ Basket validation error: $uid - ${validationResult.message}")
-                    _uiState.update {
-                        it.copy(
-                            error = "驗證籃子失敗: ${validationResult.message}",
-                            isValidating = false
-                        )
-                    }
-                    // 單次模式停止掃描
-                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                        scanManager.stopScanning()
-                    }
-                }
-            }
-
-            // 移除驗證標記
-            kotlinx.coroutines.delay(500)
+            _uiState.update { it.copy(isValidating = false) }
+            delay(300)
             validatingUids.remove(uid)
+
+            if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                scanManager.stopScanning()
+            }
         }
     }
 

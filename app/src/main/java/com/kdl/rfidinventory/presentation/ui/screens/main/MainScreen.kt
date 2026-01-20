@@ -118,9 +118,9 @@ fun MainScreen(
                     ),
                     MenuItem(
                         title = "倉庫轉換",
-                        description = "進行籃子倉庫籃子",
+                        description = "進行籃子倉庫轉移",
                         icon = Icons.Default.Cached,
-                        route = ""
+                        route = Screen.Transfer.route
                     )
                 ),
                 navController = navController

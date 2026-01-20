@@ -5,7 +5,10 @@ import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.api.ApiService
+import com.kdl.rfidinventory.data.remote.dto.request.BasketIdDto
+import com.kdl.rfidinventory.data.remote.dto.request.BulkUpdateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.ClearRequest
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.dto.request.ScanRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
 import kotlinx.coroutines.Dispatchers
@@ -121,6 +124,132 @@ class BasketRepository @Inject constructor(
         }
     }
 
+    /**
+     * 通用獲取籃子方法 (Fetch & Sync)
+     * 1. 在線模式：從 API 獲取最新資料 -> 解析 JSON -> 更新本地 DB -> 回傳 Basket
+     * 2. 離線模式：直接從本地 DB 獲取 -> 回傳 Basket
+     */
+    suspend fun fetchBasket(uid: String, isOnline: Boolean): Result<Basket> = withContext(Dispatchers.IO) {
+        try {
+            if (isOnline) {
+                // Online: 呼叫 API
+                val response = apiService.getBasketByRfid(uid)
+
+                if (response.isSuccessful && response.body() != null) {
+                    val apiBasket = response.body()!!
+                    val basket = apiBasket.toBasket() // 使用 Extensions.kt 中的解析邏輯
+
+                    // 同步到本地資料庫
+                    basketDao.insertBasket(basket.toEntity())
+
+                    Timber.d("✅ Fetch & Sync success: ${basket.uid}")
+                    Result.success(basket)
+                } else if (response.code() == 404) {
+                    // 404 代表籃子未註冊
+                    Timber.w("⚠️ Basket not found on server: $uid")
+                    Result.failure(Exception("BASKET_NOT_REGISTERED"))
+                } else {
+                    Result.failure(Exception("API Error: ${response.code()}"))
+                }
+            } else {
+                // Offline: 讀取本地
+                val entity = basketDao.getBasketByUid(uid)
+                if (entity != null) {
+                    Timber.d("📱 Offline fetch success: ${entity.uid}")
+                    Result.success(entity.toBasket())
+                } else {
+                    Timber.w("⚠️ Basket not found locally: $uid")
+                    Result.failure(Exception("BASKET_NOT_FOUND_LOCAL"))
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Fetch basket error")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 清除籃子配置 (批量)
+     */
+    suspend fun clearBasketConfiguration(uids: List<String>, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            // 1. 建構 Request 物件
+            val request = BulkUpdateRequest(
+                updateType = "Clear",
+                commonData = CommonDataDto(), // Clear 模式下 commonData 為空
+                baskets = uids.map { BasketIdDto(rfid = it) }
+            )
+
+            if (isOnline) {
+                // 2. Online: 呼叫批量 API
+                val response = apiService.bulkUpdateBaskets(request)
+
+                if (response.isSuccessful) {
+                    Timber.d("✅ Bulk clear success: ${response.body()?.updated_count} items")
+
+                    // 成功後，更新本地資料庫
+                    clearLocalBaskets(uids)
+
+                    Result.success(Unit)
+                } else {
+                    val errorMsg = response.errorBody()?.string() ?: response.message()
+                    Timber.e("❌ Bulk clear failed: $errorMsg")
+                    Result.failure(Exception("清除失敗: $errorMsg"))
+                }
+            } else {
+                // 3. Offline: 儲存到 PendingOperation
+                val payloadJson = Json.encodeToString(request)
+
+                // 為了簡化同步邏輯，我們可以將批量請求儲存為單一操作
+                // 或者如果後端同步只支援單筆，則需要拆分 (建議後端同步也支援 bulk)
+                // 這裡假設同步機制能處理這個 payload
+                val operation = PendingOperationEntity(
+                    operationType = OperationType.CLEAR_ASSOCIATION, // 需確認此 Enum 是否存在或需新增 BULK_UPDATE
+                    uid = "BULK-${System.currentTimeMillis()}", // 批量操作使用特殊 UID
+                    payload = payloadJson,
+                    timestamp = System.currentTimeMillis()
+                )
+                pendingOperationDao.insertOperation(operation)
+
+                // 更新本地資料庫
+                clearLocalBaskets(uids)
+
+                Timber.d("📱 Offline clear saved for ${uids.size} baskets")
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Clear basket configuration error")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 輔助方法：清除本地籃子資料
+     */
+    private suspend fun clearLocalBaskets(uids: List<String>) {
+        uids.forEach { uid ->
+            val entity = basketDao.getBasketByUid(uid)
+            entity?.let {
+                basketDao.updateBasket(
+                    it.copy(
+                        productId = null,
+                        productName = null,
+                        batchId = null,
+                        warehouseId = null,
+                        productJson = null,
+                        batchJson = null,
+                        quantity = 0,
+                        status = BasketStatus.UNASSIGNED,
+                        productionDate = null,
+                        expireDate = null,
+                        lastUpdated = System.currentTimeMillis(),
+                        updateBy = null // 清除時也可以記錄 updateBy，視需求而定
+                    )
+                )
+            }
+        }
+    }
+
 //    suspend fun updateBasket(basket: Basket, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
 //        try {
 //            if (isOnline) {
@@ -191,74 +320,74 @@ class BasketRepository @Inject constructor(
         }
     }
 
-    suspend fun clearBasketConfiguration(uids: List<String>, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            if (isOnline) {
-                val request = ClearRequest(
-                    basketUids = uids,
-                    timestamp = System.currentTimeMillis().toString()
-                )
-                val response = apiService.markForClear(request)
-                if (response.success) {
-                    uids.forEach { uid ->
-                        val entity = basketDao.getBasketByUid(uid)
-                        entity?.let {
-                            basketDao.updateBasket(
-                                it.copy(
-                                    productId = null,
-                                    productName = null,
-                                    batchId = null,
-                                    warehouseId = null,
-                                    productJson = null,
-                                    batchJson = null,
-                                    quantity = 0,
-                                    status = BasketStatus.UNASSIGNED,
-                                    productionDate = null,
-                                    expireDate = null,
-                                    lastUpdated = System.currentTimeMillis(),
-                                    updateBy = null
-                                )
-                            )
-                        }
-                    }
-                    Result.success(Unit)
-                } else {
-                    Result.failure(Exception(response.message ?: "清除失敗"))
-                }
-            } else {
-                uids.forEach { uid ->
-                    val operation = PendingOperationEntity(
-                        operationType = OperationType.CLEAR_ASSOCIATION,
-                        uid = uid,
-                        payload = "",
-                        timestamp = System.currentTimeMillis()
-                    )
-                    pendingOperationDao.insertOperation(operation)
-
-                    val entity = basketDao.getBasketByUid(uid)
-                    entity?.let {
-                        basketDao.updateBasket(
-                            it.copy(
-                                productId = null,
-                                productName = null,
-                                batchId = null,
-                                warehouseId = null,
-                                productJson = null,
-                                batchJson = null,
-                                quantity = 0,
-                                status = BasketStatus.UNASSIGNED,
-                                productionDate = null,
-                                expireDate = null,
-                                lastUpdated = System.currentTimeMillis(),
-                                updateBy = null
-                            )
-                        )
-                    }
-                }
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+//    suspend fun clearBasketConfiguration(uids: List<String>, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+//        try {
+//            if (isOnline) {
+//                val request = ClearRequest(
+//                    basketUids = uids,
+//                    timestamp = System.currentTimeMillis().toString()
+//                )
+//                val response = apiService.markForClear(request)
+//                if (response.success) {
+//                    uids.forEach { uid ->
+//                        val entity = basketDao.getBasketByUid(uid)
+//                        entity?.let {
+//                            basketDao.updateBasket(
+//                                it.copy(
+//                                    productId = null,
+//                                    productName = null,
+//                                    batchId = null,
+//                                    warehouseId = null,
+//                                    productJson = null,
+//                                    batchJson = null,
+//                                    quantity = 0,
+//                                    status = BasketStatus.UNASSIGNED,
+//                                    productionDate = null,
+//                                    expireDate = null,
+//                                    lastUpdated = System.currentTimeMillis(),
+//                                    updateBy = null
+//                                )
+//                            )
+//                        }
+//                    }
+//                    Result.success(Unit)
+//                } else {
+//                    Result.failure(Exception(response.message ?: "清除失敗"))
+//                }
+//            } else {
+//                uids.forEach { uid ->
+//                    val operation = PendingOperationEntity(
+//                        operationType = OperationType.CLEAR_ASSOCIATION,
+//                        uid = uid,
+//                        payload = "",
+//                        timestamp = System.currentTimeMillis()
+//                    )
+//                    pendingOperationDao.insertOperation(operation)
+//
+//                    val entity = basketDao.getBasketByUid(uid)
+//                    entity?.let {
+//                        basketDao.updateBasket(
+//                            it.copy(
+//                                productId = null,
+//                                productName = null,
+//                                batchId = null,
+//                                warehouseId = null,
+//                                productJson = null,
+//                                batchJson = null,
+//                                quantity = 0,
+//                                status = BasketStatus.UNASSIGNED,
+//                                productionDate = null,
+//                                expireDate = null,
+//                                lastUpdated = System.currentTimeMillis(),
+//                                updateBy = null
+//                            )
+//                        )
+//                    }
+//                }
+//                Result.success(Unit)
+//            }
+//        } catch (e: Exception) {
+//            Result.failure(e)
+//        }
+//    }
 }

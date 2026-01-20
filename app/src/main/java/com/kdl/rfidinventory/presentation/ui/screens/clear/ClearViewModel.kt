@@ -11,6 +11,7 @@ import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -31,7 +32,6 @@ class ClearViewModel @Inject constructor(
 
     val isOnline: StateFlow<Boolean> = webSocketManager.isOnline
 
-    // 綜合網絡狀態（結合 isOnline 和待同步數量）
     val networkState: StateFlow<NetworkState> = combine(
         isOnline,
         pendingOperationDao.getPendingCount()
@@ -68,7 +68,7 @@ class ClearViewModel @Inject constructor(
                 ScanMode.SINGLE
             ),
             canStartScan = {
-                true  // 清除功能不需要前置條件
+                true
             }
         )
     }
@@ -159,44 +159,54 @@ class ClearViewModel @Inject constructor(
             validatingUids.add(uid)
             _uiState.update { it.copy(isValidating = true) }
 
-            // 從本地數據庫查詢籃子信息
-            basketRepository.getBasketByUid(uid)
+            basketRepository.fetchBasket(uid, isOnline.value)
                 .onSuccess { basket ->
-                    if (basket.status == BasketStatus.UNASSIGNED) {
-                        Timber.w("⚠️ Basket is UNASSIGNED: $uid")
-                        _uiState.update {
-                            it.copy(
-                                isValidating = false,
-                                error = "籃子 ${uid.takeLast(8)} 狀態為「未配置」，無法清除\n只能清除已配置的籃子"
-                            )
+//                    if (basket.status == BasketStatus.UNASSIGNED) {
+//                        Timber.w("⚠️ Basket is UNASSIGNED: $uid")
+//                        _uiState.update {
+//                            it.copy(
+//                                isValidating = false,
+//                                error = "籃子 ${uid.takeLast(8)} 狀態為「未配置」，無法清除\n只能清除已配置的籃子"
+//                            )
+//                        }
+//                    } else {
+//                        Timber.d("✅ Basket is valid for clearing: $uid (${basket.status})")
+//                        addBasket(basket)
+//                    }
+                    when (basket.status) {
+                        BasketStatus.UNASSIGNED -> {
+                            Timber.d("✅ Basket valid for production: $uid")
+                            _uiState.update {
+                                it.copy(error = "籃子 ${uid.takeLast(8)} 狀態為「未配置」，無法清除\n只能清除已配置的籃子")
+                            }
                         }
-                        // 單次模式停止掃描
-                        if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                            scanManager.stopScanning()
+                        else -> {
+                            Timber.d("✅ Basket is valid for clearing: $uid (${basket.status})")
+                            addBasket(basket)
                         }
-                    } else {
-                        // ✅ 狀態有效，添加到列表
-                        Timber.d("✅ Basket is valid for clearing: $uid (${basket.status})")
-                        addBasket(basket)
                     }
                 }
                 .onFailure { error ->
                     Timber.w("⚠️ Basket not found: $uid - ${error.message}")
+//                    _uiState.update {
+//                        it.copy(
+//                            isValidating = false,
+//                            error = "籃子 ${uid.takeLast(8)} 不存在或無法讀取"
+//                        )
+//                    }
                     _uiState.update {
-                        it.copy(
-                            isValidating = false,
-                            error = "籃子 ${uid.takeLast(8)} 不存在或無法讀取"
-                        )
+                        it.copy(error = "籃子 ${uid.takeLast(8)} 不存在或無法讀取")
                     }
-                    // 單次模式停止掃描
-                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                        scanManager.stopScanning()
-                    }
+
                 }
 
-            // 移除驗證標記
-            kotlinx.coroutines.delay(300)
+            _uiState.update { it.copy(isValidating = false) }
+            delay(300)
             validatingUids.remove(uid)
+
+            if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                scanManager.stopScanning()
+            }
         }
     }
 
@@ -220,21 +230,6 @@ class ClearViewModel @Inject constructor(
         // 單次掃描模式：成功後自動停止
         if (_uiState.value.scanMode == ScanMode.SINGLE) {
             scanManager.stopScanning()
-        }
-    }
-
-    fun updateBasketQuantity(uid: String, newQuantity: Int) {
-        _uiState.update { state ->
-            state.copy(
-                scannedBaskets = state.scannedBaskets.map { item ->
-                    if (item.basket.uid == uid) {
-                        val updatedBasket = item.basket.copy(quantity = newQuantity)
-                        item.copy(basket = updatedBasket)
-                    } else {
-                        item
-                    }
-                }
-            )
         }
     }
 

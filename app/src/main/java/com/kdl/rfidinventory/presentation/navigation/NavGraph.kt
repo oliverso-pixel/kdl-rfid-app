@@ -12,6 +12,7 @@ import com.kdl.rfidinventory.presentation.ui.screens.main.MainScreen
 import com.kdl.rfidinventory.presentation.ui.screens.production.ProductionScreen
 import com.kdl.rfidinventory.presentation.ui.screens.warehouse.receiving.ReceivingScreen
 import com.kdl.rfidinventory.presentation.ui.screens.warehouse.inventory.InventoryScreen
+import com.kdl.rfidinventory.presentation.ui.screens.warehouse.transfer.TransferScreen
 import com.kdl.rfidinventory.presentation.ui.screens.clear.ClearScreen
 //import com.kdl.rfidinventory.presentation.ui.screens.sampling.SamplingScreen
 import com.kdl.rfidinventory.presentation.ui.screens.admin.AdminScreen
@@ -29,10 +30,10 @@ sealed class Screen(val route: String, val title: String) {
 
     data object Receiving : Screen("receiving", "倉庫收貨")
     data object Inventory : Screen("inventory", "倉庫盤點")
-    object Transfer : Screen("transfer", "倉庫轉換")
+    data object Transfer : Screen("transfer", "倉庫轉換")
 
-    object Loading : Screen("loading", "上貨模式")
-    object ShippingVerify : Screen("shipping_verify", "出貨模式")
+    data object Loading : Screen("loading", "上貨模式")
+    data object ShippingVerify : Screen("shipping_verify", "出貨模式")
 
     data object Clear : Screen("clear", "清除配置")
 //    data object Sampling : Screen("sampling", "抽樣檢驗")
@@ -159,10 +160,5 @@ fun NavGraph(
             )
         }
     }
-}
-
-@Composable
-fun TransferScreen(onNavigateBack: () -> Boolean) {
-    TODO("Not yet implemented")
 }
 
