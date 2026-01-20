@@ -40,7 +40,6 @@ fun MainScreen(
                     title = {
                         Column {
                             Text("RFID 庫存管理系統")
-                            // ✅ 显示当前用户
                             currentUser?.let { user ->
                                 Text(
                                     text = "${user.name} (${user.role})",

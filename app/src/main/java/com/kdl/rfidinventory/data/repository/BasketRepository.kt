@@ -121,38 +121,39 @@ class BasketRepository @Inject constructor(
         }
     }
 
-    suspend fun updateBasket(basket: Basket, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            if (isOnline) {
-                val request = UpdateBasketRequest(
-                    productId = basket.product?.id,
-                    batchId = basket.batch?.id,
-                    quantity = basket.quantity,
-                    status = basket.status.name,
-                    productionDate = basket.productionDate
-                )
-                val response = apiService.updateBasket(basket.uid, request)
-                if (response.success) {
-                    basketDao.updateBasket(basket.toEntity())
-                    Result.success(Unit)
-                } else {
-                    Result.failure(Exception(response.message ?: "更新失敗"))
-                }
-            } else {
-                val operation = PendingOperationEntity(
-                    operationType = OperationType.ADMIN_UPDATE,
-                    uid = basket.uid,
-                    payload = Json.encodeToString(basket),
-                    timestamp = System.currentTimeMillis()
-                )
-                pendingOperationDao.insertOperation(operation)
-                basketDao.updateBasket(basket.toEntity())
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+//    suspend fun updateBasket(basket: Basket, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+//        try {
+//            if (isOnline) {
+//                val request = UpdateBasketRequest(
+//                    productId = basket.product?.id,
+//                    batchId = basket.batch?.id,
+//                    quantity = basket.quantity,
+//                    status = basket.status.name,
+//                    productionDate = basket.productionDate
+//                )
+//                val response = apiService.updateBasket(basket.uid, request)
+//                if (response.success) {
+//                    basketDao.updateBasket(basket.toEntity())
+//                    Result.success(Unit)
+//                } else {
+////                    Result.failure(Exception(response.message ?: "更新失敗"))
+//                    Result.failure(Exception("更新失敗"))
+//                }
+//            } else {
+//                val operation = PendingOperationEntity(
+//                    operationType = OperationType.ADMIN_UPDATE,
+//                    uid = basket.uid,
+//                    payload = Json.encodeToString(basket),
+//                    timestamp = System.currentTimeMillis()
+//                )
+//                pendingOperationDao.insertOperation(operation)
+//                basketDao.updateBasket(basket.toEntity())
+//                Result.success(Unit)
+//            }
+//        } catch (e: Exception) {
+//            Result.failure(e)
+//        }
+//    }
 
     suspend fun deleteBasket(uid: String, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         try {

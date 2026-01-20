@@ -4,7 +4,6 @@ import com.kdl.rfidinventory.data.local.database.AppDatabase
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.remote.api.ApiService
-import com.kdl.rfidinventory.data.remote.api.RegisterBasketRequest
 import com.kdl.rfidinventory.data.remote.dto.request.CreateBasketRequest
 import com.kdl.rfidinventory.presentation.ui.screens.admin.AppSettings
 import kotlinx.coroutines.Dispatchers

@@ -11,6 +11,7 @@ import com.kdl.rfidinventory.data.remote.dto.request.ShipBasketsRequest
 import com.kdl.rfidinventory.data.remote.dto.request.ShippingRequest
 import com.kdl.rfidinventory.data.remote.dto.request.SyncRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
+import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketStatusRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateSettingsRequest
 import com.kdl.rfidinventory.data.remote.dto.response.ApiResponse
 import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
@@ -22,6 +23,7 @@ import com.kdl.rfidinventory.data.remote.dto.response.ProductionOrderResponse
 import com.kdl.rfidinventory.data.remote.dto.response.RouteResponse
 import com.kdl.rfidinventory.data.remote.dto.response.SettingsResponse
 import com.kdl.rfidinventory.data.remote.dto.response.SyncResponse
+import com.kdl.rfidinventory.data.remote.dto.response.WarehouseResponse
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
@@ -31,7 +33,7 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 interface ApiService {
-//    // ==================== Production API ====================
+    // ==================== Production API ====================
     // 1. 獲取每日產品列表
     @GET("production/daily-products")
     suspend fun getDailyProducts(): retrofit2.Response<List<DailyProductResponse>>
@@ -50,11 +52,22 @@ interface ApiService {
         @Body request: BindBasketRequest
     ): retrofit2.Response<GenericResponse>
 
-//    // ==================== Warehouse API ====================
-//    // ==================== Shipping API ====================
-//    // ==================== Sampling API ====================
-//    // ==================== Clear API ====================
-//    // ==================== Admin API ====================
+    // ==================== Warehouse API ====================
+    // 獲取倉庫列表
+    @GET("warehouses/")
+    suspend fun getWarehouses(): retrofit2.Response<List<WarehouseResponse>>
+
+    // 更新籃子 (通用 PUT) - 用於收貨、轉換等
+    @PUT("baskets/{uid}")
+    suspend fun updateBasket(
+        @Path("uid") uid: String,
+        @Body request: UpdateBasketStatusRequest
+    ): retrofit2.Response<GenericResponse>
+
+    // ==================== Shipping API ====================
+    // ==================== Sampling API ====================
+    // ==================== Clear API ====================
+    // ==================== Admin API ====================
     // 籃子查詢：GET /api/v1/baskets/{rfid}
     // 注意：這裡不使用 ApiResponse 包裝，因為 curl 顯示直接回傳 JSON 物件或 {"detail":...}
     @GET("baskets/{rfid}")
@@ -66,9 +79,7 @@ interface ApiService {
 
 
 
-    // 籃子相關
-    @POST("baskets/scan")
-    suspend fun scanBasket(@Body request: ScanRequest): ApiResponse<BasketDetailResponse>
+
 
     @GET("baskets/{uid}")
     suspend fun getBasketByUid(@Path("uid") uid: String): ApiResponse<BasketDetailResponse>
@@ -82,33 +93,6 @@ interface ApiService {
     @DELETE("baskets/{uid}")
     suspend fun deleteBasket(@Path("uid") uid: String): ApiResponse<Unit>
 
-    // 籃子註冊相關 - 使用 ApiResponse
-//    @GET("baskets/{uid}/check")
-//    suspend fun checkBasketRegistration(@Path("uid") uid: String): ApiResponse<BasketRegistrationResponse>
-//
-//    @POST("baskets/register")
-//    suspend fun registerBasket(@Body request: RegisterBasketRequest): ApiResponse<BasketRegistrationResponse>
-
-    // 生產相關
-    @GET("production/orders")
-    suspend fun getProductionOrders(): ApiResponse<List<ProductionOrderResponse>>
-
-    @GET("products/{id}")
-    suspend fun getProductById(@Path("id") productId: String): ApiResponse<ProductDetailResponse>
-
-    @POST("production/start")
-    suspend fun startProduction(@Body request: ProductionStartRequest): ApiResponse<Unit>
-
-    // 倉庫相關
-    @GET("warehouse/routes")
-    suspend fun getRoutes(): ApiResponse<List<RouteResponse>>
-
-    @POST("warehouse/receiving")
-    suspend fun receiveBasket(@Body request: ReceivingRequest): ApiResponse<Unit>
-
-    @POST("warehouse/shipping")
-    suspend fun shipBasket(@Body request: ShippingRequest): ApiResponse<Unit>
-
     // 出貨相關
     @POST("shipping/ship")
     suspend fun shipBaskets(@Body request: ShipBasketsRequest): ApiResponse<Unit>
@@ -120,27 +104,4 @@ interface ApiService {
     // 清籃相關
     @POST("clear/mark")
     suspend fun markForClear(@Body request: ClearRequest): ApiResponse<Unit>
-
-    // 同步相關
-    @POST("sync/operations")
-    suspend fun syncOperations(@Body request: SyncRequest): ApiResponse<SyncResponse>
-
-    // 管理員相關
-    @GET("admin/settings")
-    suspend fun getSettings(): ApiResponse<SettingsResponse>
-
-    @PUT("admin/settings")
-    suspend fun updateSettings(@Body request: UpdateSettingsRequest): ApiResponse<Unit>
 }
-
-data class BasketRegistrationResponse(
-    val isRegistered: Boolean,
-    val uid: String,
-    val registeredAt: String?,
-    val status: String?
-)
-
-data class RegisterBasketRequest(
-    val uid: String,
-    val registeredAt: Long
-)

@@ -10,6 +10,7 @@ import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Warehouse
 import com.kdl.rfidinventory.data.model.getBasketStatusText
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketValidationForReceivingResult
 import com.kdl.rfidinventory.data.repository.ReceivingItem
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
@@ -32,7 +33,8 @@ class ReceivingViewModel @Inject constructor(
     private val scanManager: ScanManager,
     private val warehouseRepository: WarehouseRepository,
     private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao
+    private val pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReceivingUiState())
@@ -407,7 +409,14 @@ class ReceivingViewModel @Inject constructor(
                 )
             }
 
-            warehouseRepository.receiveBaskets(receivingItems, warehouse.id, online)
+            val currentUser = authRepository.getCurrentUser()?.username ?: ""
+
+            warehouseRepository.receiveBaskets(
+                receivingItems,
+                warehouse.id,
+                currentUser,
+                online
+            )
                 .onSuccess {
                     _uiState.update {
                         it.copy(

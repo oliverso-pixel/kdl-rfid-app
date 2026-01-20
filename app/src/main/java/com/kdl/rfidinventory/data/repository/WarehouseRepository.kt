@@ -8,6 +8,7 @@ import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.api.ApiService
 import com.kdl.rfidinventory.data.remote.dto.request.ReceivingRequest
+import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketStatusRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -51,6 +52,34 @@ class WarehouseRepository @Inject constructor(
     private val pendingOperationDao: PendingOperationDao
 ) {
 
+    // 1. 獲取倉庫列表 (API 接駁)
+    suspend fun getWarehouses(): Result<List<Warehouse>> {
+        return try {
+            val response = apiService.getWarehouses()
+            if (response.isSuccessful && response.body() != null) {
+                val warehouses = response.body()!!.map { dto ->
+                    Warehouse(
+                        id = dto.id,
+                        name = dto.name,
+                        address = dto.location ?: "",
+                        isActive = dto.isActive
+                    )
+                }
+                Result.success(warehouses)
+            } else {
+                // 如果 API 失敗，暫時回退到 mock 或是回傳錯誤
+                Timber.e("Fetch warehouses failed: ${response.code()}")
+                Result.success(mockWarehouses()) // 或 Result.failure(...)
+//                Result.failure(Exception(response.message ?: "獲取倉庫列表失敗"))
+                Result.failure(Exception("獲取倉庫列表失敗01"))
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Fetch warehouses error")
+//            Result.success(mockWarehouses()) // Fallback
+            Result.failure(Exception("獲取倉庫列表失敗02"))
+        }
+    }
+
     /**
      * 驗證籃子是否可用於收貨
      * 只有「生產中」(IN_PRODUCTION) 狀態的籃子才能收貨
@@ -61,30 +90,52 @@ class WarehouseRepository @Inject constructor(
                 if (isOnline) {
                     // 在線：從服務器檢查
                     Timber.d("🌐 Online: Validating basket for receiving from server: $uid")
+                    val response = apiService.getBasketByRfid(uid)
 
-                    // TODO: 替換為真實 API 調用
-                    // val response = apiService.scanBasket(ScanRequest(uid))
+                    if (response.isSuccessful && response.body() != null) {
+                        val apiBasketDto = response.body()!!
+                        val basket = apiBasketDto.toBasket()
 
-                    // 暫時使用本地數據庫
-                    val entity = basketDao.getBasketByUid(uid)
-
-                    if (entity != null) {
-                        val basket = entity.toBasket()
+                        // 更新本地緩存
+                        basketDao.insertBasket(basket.toEntity())
 
                         when (basket.status) {
                             BasketStatus.IN_PRODUCTION -> {
-                                Timber.d("✅ Basket is valid for receiving: $uid (IN_PRODUCTION)")
+                                Timber.d("✅ Basket is valid for receiving (local): $uid (IN_PRODUCTION)")
                                 BasketValidationForReceivingResult.Valid(basket)
                             }
                             else -> {
-                                Timber.w("⚠️ Basket has invalid status for receiving: $uid (${basket.status})")
+                                Timber.w("⚠️ Basket has invalid status for receiving (local): $uid (${basket.status})")
                                 BasketValidationForReceivingResult.InvalidStatus(basket, basket.status)
                             }
                         }
-                    } else {
-                        Timber.w("⚠️ Basket not registered: $uid")
+                    } else if (response.code() == 404) {
+                        // 404 代表籃子不存在，視為未註冊
                         BasketValidationForReceivingResult.NotRegistered(uid)
+                    } else {
+                        BasketValidationForReceivingResult.Error("API Error: ${response.code()}")
                     }
+
+//                    // 暫時使用本地數據庫
+//                    val entity = basketDao.getBasketByUid(uid)
+//
+//                    if (entity != null) {
+//                        val basket = entity.toBasket()
+//
+//                        when (basket.status) {
+//                            BasketStatus.IN_PRODUCTION -> {
+//                                Timber.d("✅ Basket is valid for receiving: $uid (IN_PRODUCTION)")
+//                                BasketValidationForReceivingResult.Valid(basket)
+//                            }
+//                            else -> {
+//                                Timber.w("⚠️ Basket has invalid status for receiving: $uid (${basket.status})")
+//                                BasketValidationForReceivingResult.InvalidStatus(basket, basket.status)
+//                            }
+//                        }
+//                    } else {
+//                        Timber.w("⚠️ Basket not registered: $uid")
+//                        BasketValidationForReceivingResult.NotRegistered(uid)
+//                    }
                 } else {
                     // 離線：從本地數據庫檢查
                     Timber.d("📱 Offline: Validating basket for receiving from local database: $uid")
@@ -202,26 +253,6 @@ class WarehouseRepository @Inject constructor(
             }
         }
 
-    // 獲取倉庫列表
-    suspend fun getWarehouses(): Result<List<Warehouse>> {
-        return try {
-            // TODO: 替換為真實 API 調用
-            // val response = apiService.getWarehouses()
-            // if (response.success && response.data != null) {
-            //     Result.success(response.data.map { it.toWarehouse() })
-            // } else {
-            //     Result.failure(Exception(response.message ?: "獲取倉庫列表失敗"))
-            // }
-
-            delay(500) // 模擬網絡延遲
-            Result.success(mockWarehouses())
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to fetch warehouses")
-            delay(500)
-            Result.success(mockWarehouses())
-        }
-    }
-
     /**
      *  收貨籃子
      */
@@ -229,73 +260,82 @@ class WarehouseRepository @Inject constructor(
     suspend fun receiveBaskets(
         items: List<ReceivingItem>,
         warehouseId: String,
+        updateBy: String,
         isOnline: Boolean
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME)
 
+            val timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME)
             Timber.d("📦 ========== 收貨提交數據 ==========")
             Timber.d("倉庫ID: $warehouseId")
             Timber.d("籃子數量: ${items.size}")
             Timber.d("在線狀態: $isOnline")
 
-            if (isOnline) {
-                // 在線模式：提交到 API
-                Timber.d("🌐 Online: Submitting to API")
+            var successCount = 0
+            val errors = mutableListOf<String>()
 
-                // TODO: 真實 API 調用
-                // items.forEach { item ->
-                //     val request = ReceivingRequest(
-                //         uid = item.uid,
-                //         warehouseId = warehouseId,
-                //         quantity = item.quantity,
-                //         timestamp = timestamp
-                //     )
-                //     val response = apiService.receiveBasket(request)
-                //     if (!response.success) {
-                //         return@withContext Result.failure(Exception(response.message ?: "收貨失敗"))
-                //     }
-                // }
+            items.forEach { item ->
+                if (isOnline) {
+                    val request = UpdateBasketStatusRequest(
+                        status = "IN_STOCK", // 收貨後變為在庫
+                        quantity = item.quantity,
+                        warehouseId = warehouseId,
+                        updateBy = updateBy
+                    )
 
-                // 模擬 API 成功
-                delay(500)
+                    try {
+                        val response = apiService.updateBasket(item.uid, request)
+                        if (response.isSuccessful) {
+                            // 更新本地 DB
+                            updateLocalBasketStatus(item.uid, warehouseId, item.quantity, "IN_STOCK", updateBy)
+                            successCount++
+                        } else {
+                            errors.add("UID ${item.uid}: ${response.code()}")
+                        }
+                    } catch (e: Exception) {
+                        errors.add("UID ${item.uid}: ${e.message}")
+                    }
+                } else {
+                    // Offline logic...
+                    // 更新本地 + 寫入 pending_operations
+                    updateLocalBasketStatus(item.uid, warehouseId, item.quantity, "IN_STOCK", updateBy)
+                    successCount++
+                }
+            }
 
-                // 更新本地數據庫
-                updateBasketsToReceived(items, warehouseId)
-
-                Timber.d("✅ 收貨成功（在線模式）")
+            if (errors.isEmpty()) {
                 Result.success(Unit)
             } else {
-                // 離線模式：保存待同步 + 更新本地
-                Timber.d("📱 Offline: Saving to pending operations")
-
-                // 保存待同步操作（暫時跳過）
-                // items.forEach { item ->
-                //     val operation = PendingOperationEntity(
-                //         operationType = OperationType.WAREHOUSE_RECEIVE,
-                //         uid = item.uid,
-                //         payload = Json.encodeToString(
-                //             ReceivingRequest(
-                //                 uid = item.uid,
-                //                 warehouseId = warehouseId,
-                //                 quantity = item.quantity,
-                //                 timestamp = timestamp
-                //             )
-                //         ),
-                //         timestamp = System.currentTimeMillis()
-                //     )
-                //     pendingOperationDao.insertOperation(operation)
-                // }
-
-                // 更新本地數據庫
-                updateBasketsToReceived(items, warehouseId)
-
-                Timber.d("✅ 收貨成功（離線模式）")
-                Result.success(Unit)
+                Result.failure(Exception("部分收貨失敗: ${errors.joinToString(", ")}"))
             }
         } catch (e: Exception) {
             Timber.e(e, "收貨失敗")
             Result.failure(e)
+        }
+    }
+
+    /**
+     * 更新籃子為已收貨狀態
+     */
+    private suspend fun updateLocalBasketStatus(
+        uid: String,
+        warehouseId: String,
+        quantity: Int,
+        status: String,
+        updateBy: String
+    ) {
+        val entity = basketDao.getBasketByUid(uid)
+        if (entity != null) {
+            val newStatus = try { BasketStatus.valueOf(status) } catch (e: Exception) { entity.status }
+            basketDao.updateBasket(
+                entity.copy(
+                    warehouseId = warehouseId,
+                    quantity = quantity,
+                    status = newStatus,
+                    updateBy = updateBy,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
         }
     }
 
@@ -466,21 +506,6 @@ class WarehouseRepository @Inject constructor(
                 Result.failure(e)
             }
         }
-}
-
-/**
- * 計算到期天數
- */
-@RequiresApi(Build.VERSION_CODES.O)
-fun Basket.getDaysUntilExpiry(): Long? {
-    val expireDate = this.expireDate ?: return null
-    return try {
-        val expire = LocalDate.parse(expireDate)
-        val today = LocalDate.now()
-        ChronoUnit.DAYS.between(today, expire)
-    } catch (e: Exception) {
-        null
-    }
 }
 
 data class ReceivingItem(

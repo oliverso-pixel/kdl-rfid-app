@@ -29,6 +29,7 @@ sealed class Screen(val route: String, val title: String) {
 
     data object Receiving : Screen("receiving", "倉庫收貨")
     data object Inventory : Screen("inventory", "倉庫盤點")
+    object Transfer : Screen("transfer", "倉庫轉換")
 
     object Loading : Screen("loading", "上貨模式")
     object ShippingVerify : Screen("shipping_verify", "出貨模式")
@@ -98,6 +99,11 @@ fun NavGraph(
                 onNavigateBack = { navController.popBackStack() }
             )
         }
+        composable(Screen.Transfer.route) {
+            TransferScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
 
         composable(Screen.Loading.route) {
             LoadingScreen(
@@ -153,5 +159,10 @@ fun NavGraph(
             )
         }
     }
+}
+
+@Composable
+fun TransferScreen(onNavigateBack: () -> Boolean) {
+    TODO("Not yet implemented")
 }
 
