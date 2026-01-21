@@ -60,7 +60,6 @@ class WebSocketManager @Inject constructor(
     private var lastPongTime = System.currentTimeMillis()
 
     init {
-        // 監聽 WebSocket 狀態變化
         heartbeatScope.launch {
             kotlinx.coroutines.flow.combine(
                 _enableWebSocket,
@@ -242,7 +241,7 @@ class WebSocketManager @Inject constructor(
      * 斷開連接
      */
     fun disconnect() {
-        stopHeartbeat()  // 先停止心跳
+        stopHeartbeat()
         webSocket?.close(1000, "Client disconnecting")
         webSocket = null
         _connectionState.value = WebSocketState.Disconnected("Client disconnected")
@@ -279,7 +278,7 @@ class WebSocketManager @Inject constructor(
     }
 
     /**
-     * ✅ 清理資源
+     * 清理資源
      */
     fun cleanup() {
         stopHeartbeat()

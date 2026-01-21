@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.LoadingRepository
+import com.kdl.rfidinventory.data.repository.WarehouseRepository
 import com.kdl.rfidinventory.util.NetworkState
 import com.kdl.rfidinventory.util.ScanManager
 import com.kdl.rfidinventory.util.ScanMode
@@ -24,6 +25,7 @@ import javax.inject.Inject
 class LoadingViewModel @Inject constructor(
     private val scanManager: ScanManager,
     private val loadingRepository: LoadingRepository,
+    private val warehouseRepository: WarehouseRepository,
     private val webSocketManager: WebSocketManager,
 ) : ViewModel() {
 
@@ -237,7 +239,7 @@ class LoadingViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingWarehouses = true) }
 
-            loadingRepository.getWarehouses()
+            warehouseRepository.getWarehouses()
                 .onSuccess { warehouses ->
                     _uiState.update {
                         it.copy(

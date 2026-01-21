@@ -12,16 +12,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import com.kdl.rfidinventory.data.model.Product
-import com.kdl.rfidinventory.data.model.mockProductionOrders
 import com.kdl.rfidinventory.presentation.ui.components.ProductSelectionCard
 import com.kdl.rfidinventory.presentation.ui.components.ProductSelectionDialog
 import kotlinx.coroutines.flow.update

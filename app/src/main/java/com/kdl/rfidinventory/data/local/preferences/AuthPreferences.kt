@@ -1,4 +1,3 @@
-// data/local/preferences/AuthPreferences.kt
 package com.kdl.rfidinventory.data.local.preferences
 
 import android.content.Context
@@ -6,7 +5,6 @@ import android.content.SharedPreferences
 import com.google.gson.Gson
 import com.kdl.rfidinventory.data.model.User
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.serialization.encodeToString
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton

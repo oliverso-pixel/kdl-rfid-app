@@ -13,8 +13,6 @@ import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
-import com.kdl.rfidinventory.data.repository.BasketValidationForReceivingResult
-import com.kdl.rfidinventory.data.repository.ReceivingItem
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.util.*
@@ -36,8 +34,8 @@ enum class ReceivingStep {
 class ReceivingViewModel @Inject constructor(
     private val scanManager: ScanManager,
     private val warehouseRepository: WarehouseRepository,
-    private val webSocketManager: WebSocketManager,
     private val basketRepository: BasketRepository,
+    private val webSocketManager: WebSocketManager,
     private val pendingOperationDao: PendingOperationDao,
     private val authRepository: AuthRepository
 ) : ViewModel() {
@@ -85,7 +83,6 @@ class ReceivingViewModel @Inject constructor(
                         )
                     }
 
-                    // 加載完成後啟動條碼掃描
                     if (_uiState.value.currentStep == ReceivingStep.SELECT_WAREHOUSE) {
                         scanManager.startBarcodeScan(ScanContext.WAREHOUSE_SEARCH)
                     }
@@ -105,7 +102,6 @@ class ReceivingViewModel @Inject constructor(
     fun selectWarehouse(warehouse: Warehouse) {
         Timber.d("📍 Selected warehouse: ${warehouse.name}")
 
-        // 停止條碼掃描，切換到 RFID 掃描
         scanManager.stopScanning()
 
         _uiState.update {
@@ -140,7 +136,7 @@ class ReceivingViewModel @Inject constructor(
             scanManager.scanResults.collect { result ->
                 when (result) {
                     is ScanResult.BarcodeScanned -> {
-                        Timber.d("📦 Barcode scanned: ${result.barcode}, context: ${result.context}")
+//                        Timber.d("📦 Barcode scanned: ${result.barcode}, context: ${result.context}")
 
                         when (_uiState.value.currentStep) {
                             ReceivingStep.SELECT_WAREHOUSE -> {

@@ -1,30 +1,19 @@
 package com.kdl.rfidinventory.data.remote.api
 
-import com.kdl.rfidinventory.data.remote.dto.request.BindBasketRequest
+import com.kdl.rfidinventory.data.remote.dto.request.BulkCreateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.BulkUpdateRequest
-import com.kdl.rfidinventory.data.remote.dto.request.ClearRequest
 import com.kdl.rfidinventory.data.remote.dto.request.CreateBasketRequest
-import com.kdl.rfidinventory.data.remote.dto.request.ProductionStartRequest
-import com.kdl.rfidinventory.data.remote.dto.request.ReceivingRequest
 import com.kdl.rfidinventory.data.remote.dto.request.SamplingRequest
-import com.kdl.rfidinventory.data.remote.dto.request.ScanRequest
 import com.kdl.rfidinventory.data.remote.dto.request.ShipBasketsRequest
-import com.kdl.rfidinventory.data.remote.dto.request.ShippingRequest
-import com.kdl.rfidinventory.data.remote.dto.request.SyncRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketStatusRequest
-import com.kdl.rfidinventory.data.remote.dto.request.UpdateSettingsRequest
 import com.kdl.rfidinventory.data.remote.dto.response.ApiResponse
 import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
+import com.kdl.rfidinventory.data.remote.dto.response.BulkCreateResponse
 import com.kdl.rfidinventory.data.remote.dto.response.BulkUpdateResponse
 import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
 import com.kdl.rfidinventory.data.remote.dto.response.GenericResponse
-import com.kdl.rfidinventory.data.remote.dto.response.ProductDetailResponse
 import com.kdl.rfidinventory.data.remote.dto.response.ProductionBatchResponse
-import com.kdl.rfidinventory.data.remote.dto.response.ProductionOrderResponse
-import com.kdl.rfidinventory.data.remote.dto.response.RouteResponse
-import com.kdl.rfidinventory.data.remote.dto.response.SettingsResponse
-import com.kdl.rfidinventory.data.remote.dto.response.SyncResponse
 import com.kdl.rfidinventory.data.remote.dto.response.WarehouseResponse
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -36,23 +25,15 @@ import retrofit2.http.Query
 
 interface ApiService {
     // ==================== Production API ====================
-    // 1. 獲取每日產品列表
+    // 獲取每日產品列表
     @GET("production/daily-products")
     suspend fun getDailyProducts(): retrofit2.Response<List<DailyProductResponse>>
 
-    // 2. 獲取生產批次列表
+    // 獲取生產批次列表
     @GET("production/app-list")
     suspend fun getProductionBatches(
         @Query("target_date") targetDate: String
     ): retrofit2.Response<List<ProductionBatchResponse>>
-
-    // 3. 綁定籃子 (開始生產)
-    // 使用 PUT 更新籃子狀態
-    @PUT("baskets/{uid}")
-    suspend fun bindBasket(
-        @Path("uid") uid: String,
-        @Body request: BindBasketRequest
-    ): retrofit2.Response<GenericResponse>
 
     // ==================== Warehouse API ====================
     // 獲取倉庫列表
@@ -80,6 +61,12 @@ interface ApiService {
     suspend fun createBasket(@Body request: CreateBasketRequest): retrofit2.Response<GenericResponse>
 
     // ==================== baskets API ====================
+    // 批量註冊籃子
+    @POST("baskets/bulk")
+    suspend fun createBasketsBulk(
+        @Body request: BulkCreateRequest
+    ): retrofit2.Response<BulkCreateResponse>
+
     // 通用批量更新接口 (用於 Clear, Transfer, Production 等)
     @PUT("baskets/bulk-update")
     suspend fun bulkUpdateBaskets(
@@ -107,8 +94,4 @@ interface ApiService {
     // 抽樣相關
     @POST("sampling/mark")
     suspend fun markForSampling(@Body request: SamplingRequest): ApiResponse<Unit>
-
-    // 清籃相關
-    @POST("clear/mark")
-    suspend fun markForClear(@Body request: ClearRequest): ApiResponse<Unit>
 }

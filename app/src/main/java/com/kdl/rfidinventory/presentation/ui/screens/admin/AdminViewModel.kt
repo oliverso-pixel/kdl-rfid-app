@@ -8,9 +8,14 @@ import com.kdl.rfidinventory.data.device.DeviceInfoProvider
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.local.preferences.PreferencesManager
+import com.kdl.rfidinventory.data.model.Basket
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.data.repository.AdminRepository
+import com.kdl.rfidinventory.data.repository.AuthRepository
+import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.RegisterBasketResult
 import com.kdl.rfidinventory.util.*
 import com.kdl.rfidinventory.util.rfid.RFIDManager
@@ -24,13 +29,16 @@ import javax.inject.Inject
 
 enum class BasketManagementMode {
     REGISTER,
-    QUERY
+    QUERY,
+    LOCAL
 }
 
 @RequiresApi(Build.VERSION_CODES.O)
 @HiltViewModel
 class AdminViewModel @Inject constructor(
     private val scanManager: ScanManager,
+    private val basketRepository: BasketRepository,
+    private val authRepository: AuthRepository,
     private val adminRepository: AdminRepository,
     private val pendingOperationDao: PendingOperationDao,
     private val webSocketManager: WebSocketManager,
@@ -65,6 +73,14 @@ class AdminViewModel @Inject constructor(
     val webSocketUrl: StateFlow<String> = webSocketManager.websocketUrl
 
     private val processingUids = mutableSetOf<String>()
+
+    // 登記模式：暫存的 UID 列表
+    private val _scannedUids = MutableStateFlow<Set<String>>(emptySet())
+    val scannedUids = _scannedUids.asStateFlow()
+
+    // 查詢模式：當前查詢到的籃子
+    private val _queriedBasket = MutableStateFlow<Basket?>(null)
+    val queriedBasket = _queriedBasket.asStateFlow()
 
     init {
         Timber.d("🎯 AdminViewModel init called (instance: ${this.hashCode()})")
@@ -340,6 +356,10 @@ class AdminViewModel @Inject constructor(
             BasketManagementMode.QUERY -> {
                 queryBasket(barcode)
             }
+            BasketManagementMode.LOCAL -> {
+                // 本地搜尋
+                searchBaskets(barcode)
+            }
         }
     }
 
@@ -352,6 +372,10 @@ class AdminViewModel @Inject constructor(
             }
             BasketManagementMode.QUERY -> {
                 queryBasket(uid)
+            }
+            BasketManagementMode.LOCAL -> {
+                // 本地搜尋
+                searchBaskets(uid)
             }
         }
     }
@@ -436,9 +460,102 @@ class AdminViewModel @Inject constructor(
         }
     }
 
+    // [登記] 清除暫存
+    fun submitRegistration() {
+        val uids = _scannedUids.value.toList()
+        if (uids.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRegistering = true) }
+
+            basketRepository.bulkRegisterBaskets(uids, isOnline = _networkState.value is NetworkState.Connected)
+                .onSuccess { result ->
+                    val msg = if (result.isOffline) {
+                        "已離線保存 ${result.successCount} 個籃子"
+                    } else {
+                        "登記完成: 成功 ${result.successCount} / 總數 ${result.totalCount}"
+                    }
+                    _uiState.update {
+                        it.copy(isRegistering = false, successMessage = msg)
+                    }
+                    _scannedUids.value = emptySet() // 成功後清空暫存
+                }
+                .onFailure { e ->
+                    _uiState.update { it.copy(isRegistering = false, error = e.message) }
+                }
+        }
+    }
+
+    // [登記] 清除暫存
+    fun clearScannedUids() {
+        _scannedUids.value = emptySet()
+    }
+
+    // [登記] 移除單個
+    fun removeScannedUid(uid: String) {
+        _scannedUids.update { it - uid }
+    }
+
+    // 2. [查詢] 獲取詳情
+    fun fetchBasketDetail(uid: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            basketRepository.fetchBasket(uid, isOnline = _networkState.value is NetworkState.Connected)
+                .onSuccess { basket ->
+                    _queriedBasket.value = basket
+                    _uiState.update { it.copy(isLoading = false) }
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(isLoading = false, error = "查詢失敗: ${error.message}") }
+                }
+        }
+    }
+
+    // 3. [查詢] 更新籃子
+    fun updateBasketInfo(basket: Basket, newStatus: String?, newWarehouseId: String?, newDescription: String?) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+
+            val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
+
+            // 使用通用的 submitBulkUpdate
+            val itemDto = BasketUpdateItemDto(
+                rfid = basket.uid,
+                status = newStatus,
+                warehouseId = newWarehouseId,
+                description = newDescription,
+                quantity = basket.quantity
+            )
+
+            basketRepository.updateBasket(
+                updateType = "AdminUpdate",
+                commonData = CommonDataDto(updateBy = currentUser),
+                items = listOf(itemDto),
+                isOnline = _networkState.value is NetworkState.Connected
+            ).onSuccess {
+                _uiState.update { it.copy(isLoading = false, successMessage = "更新成功") }
+                fetchBasketDetail(basket.uid) // 重新整理
+            }.onFailure { error ->
+                _uiState.update { it.copy(isLoading = false, error = error.message) }
+            }
+        }
+    }
+
     fun setBasketManagementMode(mode: BasketManagementMode) {
         _basketManagementMode.value = mode
         Timber.d("📋 Basket management mode changed to: $mode")
+
+        // 切換模式時清空暫存，避免混淆
+        _scannedUids.value = emptySet()
+        _queriedBasket.value = null
+        _uiState.update { it.copy(error = null, successMessage = null) }
+
+        // 根據模式設定預設掃描行為
+        if (mode == BasketManagementMode.REGISTER) {
+            setScanMode(ScanMode.CONTINUOUS) // 登記通常是連續掃描
+        } else {
+            setScanMode(ScanMode.SINGLE)
+        }
     }
 
     fun searchBaskets(query: String) {

@@ -57,6 +57,7 @@ dependencies {
     implementation(files("libs/jxl.jar"))
     implementation(files("libs/platform_sdk_v3.1.221124.jar"))
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.text)
 
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")

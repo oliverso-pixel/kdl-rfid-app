@@ -12,6 +12,8 @@ import com.kdl.rfidinventory.data.model.Product
 import com.kdl.rfidinventory.data.model.Warehouse
 import com.kdl.rfidinventory.data.model.mockProductionOrders
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.repository.AuthRepository
+import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.BasketValidationForInventoryResult
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
 import com.kdl.rfidinventory.util.*
@@ -92,8 +94,10 @@ data class ProductGroup(
 class InventoryViewModel @Inject constructor(
     private val scanManager: ScanManager,
     private val warehouseRepository: WarehouseRepository,
+    private val basketRepository: BasketRepository,
     private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao
+    private val pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     val _uiState = MutableStateFlow(InventoryUiState())
@@ -278,7 +282,7 @@ class InventoryViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isLoadingWarehouses = false,
-                            error = "載入倉庫列表失敗"
+                            error = "載入倉庫列表失敗: ${error.message}"
                         )
                     }
                 }
@@ -701,8 +705,6 @@ class InventoryViewModel @Inject constructor(
         _uiState.update { it.copy(products = products) }
         Timber.d("✅ Loaded ${products.size} products")
     }
-
-    //
 
     /**
      * 處理掃描的籃子

@@ -1,13 +1,19 @@
 package com.kdl.rfidinventory.data.repository
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import com.kdl.rfidinventory.data.local.dao.BasketDao
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
+import com.kdl.rfidinventory.data.local.entity.BasketEntity
 import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.api.ApiService
 import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.BulkCreateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.BulkUpdateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
+import com.kdl.rfidinventory.data.remote.dto.request.CreateBasketItemDto
+import com.kdl.rfidinventory.data.remote.dto.response.BulkCreateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -89,6 +95,7 @@ class BasketRepository @Inject constructor(
     /**
      * 統一提交籃子更新 (Production, Receiving, Transfer, Clear)
      */
+    @RequiresApi(Build.VERSION_CODES.O)
     suspend fun updateBasket(
         updateType: String,
         commonData: CommonDataDto,
@@ -141,6 +148,7 @@ class BasketRepository @Inject constructor(
     /**
      * 根據 updateType 和優先級更新本地資料庫
      */
+    @RequiresApi(Build.VERSION_CODES.O)
     private suspend fun updateLocalDatabase(
         updateType: String,
         common: CommonDataDto,
@@ -211,6 +219,77 @@ class BasketRepository @Inject constructor(
                 }
             }
             basketDao.updateBasket(updatedEntity)
+        }
+    }
+
+    /**
+     * 批量註冊籃子
+     */
+    suspend fun bulkRegisterBaskets(uids: List<String>, isOnline: Boolean): Result<BulkCreateResult> = withContext(Dispatchers.IO) {
+        try {
+            if (isOnline) {
+                // Online: 直接呼叫批量建立 API，不需預先過濾本地資料
+                val request = BulkCreateRequest(
+                    items = uids.map { CreateBasketItemDto(rfid = it, type = 1) }
+                )
+
+                // 發送請求
+                val response = apiService.createBasketsBulk(request)
+
+                if (response.isSuccessful && response.body() != null) {
+                    val results = response.body()!!.results
+
+                    // 1. 處理註冊成功的 ("Success") -> 寫入本地
+                    results.filter { it.success }.forEach { item ->
+                        saveLocalBasket(item.rfid)
+                    }
+
+                    // 2. 處理已存在的 ("Already exists") -> 確保本地也有這筆資料 (同步)
+                    results.filter { !it.success && it.message.contains("exists", ignoreCase = true) }.forEach { item ->
+                        // 這裡可以選擇不操作（因為已存在），或者為了保險起見，檢查本地是否缺失並補上
+                        saveLocalBasket(item.rfid)
+                    }
+
+                    Result.success(BulkCreateResult(
+                        successCount = results.count { it.success },
+                        totalCount = uids.size,
+                        details = results
+                    ))
+                } else {
+                    Result.failure(Exception("API 錯誤: ${response.code()}"))
+                }
+            } else {
+                // Offline: 直接寫入本地
+                uids.forEach { uid -> saveLocalBasket(uid) }
+
+                // TODO: PendingOperation 的邏輯以支援稍後同步
+
+                Result.success(BulkCreateResult(
+                    successCount = uids.size,
+                    totalCount = uids.size,
+                    details = emptyList(),
+                    isOffline = true
+                ))
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Bulk register error")
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun saveLocalBasket(uid: String) {
+        if (basketDao.getBasketByUid(uid) == null) {
+            val basket = BasketEntity(
+                uid = uid,
+                productId = null, productName = null, batchId = null, warehouseId = null,
+                productJson = null, batchJson = null,
+                quantity = 0,
+                status = BasketStatus.UNASSIGNED,
+                productionDate = null, expireDate = null,
+                lastUpdated = System.currentTimeMillis(),
+                updateBy = null
+            )
+            basketDao.insertBasket(basket)
         }
     }
 

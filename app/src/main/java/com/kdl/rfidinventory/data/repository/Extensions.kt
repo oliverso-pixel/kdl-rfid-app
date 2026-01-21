@@ -1,7 +1,6 @@
 package com.kdl.rfidinventory.data.repository
 
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
-import com.kdl.rfidinventory.data.remote.dto.response.BasketResponse
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.dto.response.BasketDetailResponse
 import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
@@ -122,7 +121,6 @@ fun BasketDetailResponse.toBasket(): Basket {
 
 // BasketEntity 轉 Basket
 fun BasketEntity.toBasket(): Basket {
-    // 优先从 JSON 反序列化（获取完整信息）
     val product = productJson?.let {
         try {
             json.decodeFromString<Product>(it)
@@ -180,105 +178,5 @@ fun BasketEntity.toBasket(): Basket {
         expireDate = expireDate,
         lastUpdated = lastUpdated,
         updateBy = updateBy
-    )
-}
-
-// BasketDetailResponse 轉 Basket
-//fun BasketDetailResponse.toBasket(): Basket {
-//    val product = if (productId != null && productName != null) {
-//        Product(
-//            id = productId,
-//            name = productName,
-//            maxBasketCapacity = 60,
-//            imageUrl = null
-//        )
-//    } else null
-//
-//    val batch = if (batchId != null && productionDate != null) {
-//        Batch(
-//            id = batchId,
-//            productId = productId ?: "",
-//            totalQuantity = quantity,
-//            remainingQuantity = quantity,
-//            productionDate = productionDate
-//        )
-//    } else null
-//
-//    return Basket(
-//        uid = uid,
-//        product = product,
-//        batch = batch,
-//        warehouseId = warehouseId,
-//        quantity = quantity,
-//        status = try {
-//            BasketStatus.valueOf(status)
-//        } catch (e: Exception) {
-//            BasketStatus.UNASSIGNED
-//        },
-//        productionDate = productionDate,
-//        expireDate = expireDate,
-//        lastUpdated = lastUpdated,
-//        updateBy = updateBy
-//    )
-//}
-
-// API Response 轉 Basket
-fun BasketResponse.toBasket(): Basket {
-    val product = if (productId != null && productName != null) {
-        Product(
-            id = productId,
-            name = productName,
-            maxBasketCapacity = 60,
-            imageUrl = null
-        )
-    } else null
-
-    val batch = if (batchId != null && productionDate != null) {
-        Batch(
-            id = batchId,
-            productId = productId ?: "",
-            totalQuantity = quantity,
-            remainingQuantity = quantity,
-            productionDate = productionDate
-        )
-    } else null
-
-    return Basket(
-        uid = uid,
-        product = product,
-        batch = batch,
-        warehouseId = warehouseId,
-        quantity = quantity,
-        status = try {
-            BasketStatus.valueOf(status)
-        } catch (e: Exception) {
-            BasketStatus.UNASSIGNED
-        },
-        productionDate = productionDate,
-        expireDate = null,
-        lastUpdated = lastUpdated,
-        updateBy = null
-    )
-}
-
-// ProductionOrderResponse 轉 ProductionOrder
-fun com.kdl.rfidinventory.data.remote.dto.response.ProductionOrderResponse.toProductionOrder(): ProductionOrder {
-    return ProductionOrder(
-        productId = productId,
-        barcodeId = barcodeId,
-        qrcodeId = qrcodeId,
-        productName = productName,
-        maxBasketCapacity = totalQuantity,
-        imageUrl = imageUrl
-    )
-}
-
-// RouteResponse 轉 Route
-fun com.kdl.rfidinventory.data.remote.dto.response.RouteResponse.toRoute(): Route {
-    return Route(
-        id = id,
-        name = name,
-        destination = destination,
-        isActive = isActive
     )
 }

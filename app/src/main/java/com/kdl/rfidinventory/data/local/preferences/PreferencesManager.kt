@@ -1,4 +1,3 @@
-// data/local/preferences/PreferencesManager.kt
 package com.kdl.rfidinventory.data.local.preferences
 
 import android.content.Context
