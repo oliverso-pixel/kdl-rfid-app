@@ -9,6 +9,8 @@ import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Warehouse
 import com.kdl.rfidinventory.data.model.getBasketStatusText
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.ReceivingItem
@@ -279,34 +281,67 @@ class TransferViewModel @Inject constructor(
 
     fun submitTransfer() {
         val targetWarehouse = uiState.value.selectedWarehouse ?: return
-        val items = uiState.value.scannedBaskets
-        if (items.isEmpty()) return
+        val baskets = uiState.value.scannedBaskets
+        if (baskets.isEmpty()) return
 
         viewModelScope.launch {
+//            _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
+//
+//            // 準備資料
+//            val receivingItems = items.map { ReceivingItem(it.basket.uid, it.basket.quantity) }
+//            val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
+//
+//            // 重用收貨邏輯 (Update Basket Status to IN_STOCK at New Warehouse)
+//            warehouseRepository.receiveBaskets(
+//                items = receivingItems,
+//                warehouseId = targetWarehouse.id,
+//                updateBy = currentUser,
+//                isOnline = isOnline.value
+//            ).onSuccess {
+//                _uiState.update {
+//                    it.copy(
+//                        isLoading = false,
+//                        scannedBaskets = emptyList(),
+//                        successMessage = "✅ 成功轉換 ${items.size} 個籃子至 ${targetWarehouse.name}"
+//                    )
+//                }
+//            }.onFailure { error ->
+//                _uiState.update {
+//                    it.copy(isLoading = false, error = "轉換失敗: ${error.message}")
+//                }
+//            }
+
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-            // 準備資料
-            val receivingItems = items.map { ReceivingItem(it.basket.uid, it.basket.quantity) }
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-            // 重用收貨邏輯 (Update Basket Status to IN_STOCK at New Warehouse)
-            warehouseRepository.receiveBaskets(
-                items = receivingItems,
+            // 1. Common Data
+            val commonData = CommonDataDto(
                 warehouseId = targetWarehouse.id,
                 updateBy = currentUser,
+                status = "IN_STOCK" // 轉換後狀態仍為在庫
+            )
+
+            // 2. Items (轉換通常不改變數量，但帶上目前數量是好習慣)
+            val items = baskets.map {
+                BasketUpdateItemDto(
+                    rfid = it.basket.uid,
+                    quantity = it.basket.quantity
+                )
+            }
+
+            // 3. 統一呼叫
+            basketRepository.updateBasket(
+                updateType = "Transfer",
+                commonData = commonData,
+                items = items,
                 isOnline = isOnline.value
             ).onSuccess {
                 _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        scannedBaskets = emptyList(),
-                        successMessage = "✅ 成功轉換 ${items.size} 個籃子至 ${targetWarehouse.name}"
-                    )
+                    it.copy(isLoading = false, scannedBaskets = emptyList(), successMessage = "✅ 轉換成功")
                 }
             }.onFailure { error ->
-                _uiState.update {
-                    it.copy(isLoading = false, error = "轉換失敗: ${error.message}")
-                }
+                _uiState.update { it.copy(isLoading = false, error = error.message) }
             }
         }
     }

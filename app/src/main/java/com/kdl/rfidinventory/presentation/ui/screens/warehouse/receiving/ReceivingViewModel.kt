@@ -9,6 +9,8 @@ import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Warehouse
 import com.kdl.rfidinventory.data.model.getBasketStatusText
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketValidationForReceivingResult
@@ -414,55 +416,92 @@ class ReceivingViewModel @Inject constructor(
 
     fun confirmReceiving() {
         viewModelScope.launch {
-            val items = _uiState.value.scannedBaskets
-            val warehouse = _uiState.value.selectedWarehouse
+//            val items = _uiState.value.scannedBaskets
+//            val warehouse = _uiState.value.selectedWarehouse
+//
+//            if (warehouse == null) {
+//                _uiState.update { it.copy(error = "請先選擇倉庫位置") }
+//                return@launch
+//            }
+//
+//            if (items.isEmpty()) {
+//                _uiState.update { it.copy(error = "請至少掃描一個籃子") }
+//                return@launch
+//            }
+//
+//            _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
+//
+//            val online = isOnline.value
+//            val receivingItems = items.map { item ->
+//                ReceivingItem(
+//                    uid = item.basket.uid,
+//                    quantity = item.basket.quantity
+//                )
+//            }
+//
+//            val currentUser = authRepository.getCurrentUser()?.username ?: ""
+//
+//            warehouseRepository.receiveBaskets(
+//                receivingItems,
+//                warehouse.id,
+//                currentUser,
+//                online
+//            )
+//                .onSuccess {
+//                    _uiState.update {
+//                        it.copy(
+//                            isLoading = false,
+//                            scannedBaskets = emptyList(),
+//                            totalQuantity = 0,
+//                            successMessage = "✅ 收貨成功，共 ${receivingItems.size} 個籃子"
+//                        )
+//                    }
+//                }
+//                .onFailure { error ->
+//                    _uiState.update {
+//                        it.copy(
+//                            isLoading = false,
+//                            error = "收貨失敗: ${error.message}"
+//                        )
+//                    }
+//                }
 
-            if (warehouse == null) {
-                _uiState.update { it.copy(error = "請先選擇倉庫位置") }
-                return@launch
-            }
-
-            if (items.isEmpty()) {
-                _uiState.update { it.copy(error = "請至少掃描一個籃子") }
-                return@launch
-            }
+            val warehouse = _uiState.value.selectedWarehouse ?: return@launch
+            val baskets = _uiState.value.scannedBaskets
+            if (baskets.isEmpty()) return@launch
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-            val online = isOnline.value
-            val receivingItems = items.map { item ->
-                ReceivingItem(
-                    uid = item.basket.uid,
-                    quantity = item.basket.quantity
+            val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
+
+            // 1. Common Data: 統一倉庫、人員、狀態
+            val commonData = CommonDataDto(
+                warehouseId = warehouse.id,
+                updateBy = currentUser,
+                status = "IN_STOCK"
+            )
+
+            // 2. Items: 包含個別數量
+            val items = baskets.map {
+                BasketUpdateItemDto(
+                    rfid = it.basket.uid,
+                    quantity = it.basket.quantity
                 )
             }
 
-            val currentUser = authRepository.getCurrentUser()?.username ?: ""
-
-            warehouseRepository.receiveBaskets(
-                receivingItems,
-                warehouse.id,
-                currentUser,
-                online
-            )
-                .onSuccess {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            scannedBaskets = emptyList(),
-                            totalQuantity = 0,
-                            successMessage = "✅ 收貨成功，共 ${receivingItems.size} 個籃子"
-                        )
-                    }
+            // 3. 統一呼叫
+            basketRepository.updateBasket(
+                updateType = "Receiving",
+                commonData = commonData,
+                items = items,
+                isOnline = isOnline.value
+            ).onSuccess {
+                _uiState.update {
+                    it.copy(isLoading = false, scannedBaskets = emptyList(), successMessage = "✅ 收貨成功")
                 }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "收貨失敗: ${error.message}"
-                        )
-                    }
-                }
+            }.onFailure { error ->
+                _uiState.update { it.copy(isLoading = false, error = error.message) }
+            }
         }
     }
 
@@ -482,7 +521,7 @@ class ReceivingViewModel @Inject constructor(
 
         // ✅ 重新啟動條碼掃描
         viewModelScope.launch {
-            kotlinx.coroutines.delay(300)
+            delay(300)
             scanManager.startBarcodeScan(ScanContext.WAREHOUSE_SEARCH)
         }
     }

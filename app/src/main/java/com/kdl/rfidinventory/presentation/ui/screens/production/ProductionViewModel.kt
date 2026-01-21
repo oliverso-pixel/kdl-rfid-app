@@ -6,9 +6,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.model.*
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
-import com.kdl.rfidinventory.data.repository.BasketValidationResult
 import com.kdl.rfidinventory.data.repository.ProductionRepository
 import com.kdl.rfidinventory.util.rfid.RFIDTag
 import com.kdl.rfidinventory.util.*
@@ -16,6 +18,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -26,7 +30,9 @@ class ProductionViewModel @Inject constructor(
     private val productionRepository: ProductionRepository,
     private val basketRepository: BasketRepository,
     private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao
+    private val pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository,
+    private val json: Json
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProductionUiState())
@@ -275,8 +281,8 @@ class ProductionViewModel @Inject constructor(
                         selectBatch(filteredBatches.first())
                     }
                 }
-                .onFailure {
-                    _uiState.update { it.copy(error = "獲取批次失敗: ${it}") }
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = "獲取批次失敗: ${error.message}") }
                 }
         }
     }
@@ -516,47 +522,88 @@ class ProductionViewModel @Inject constructor(
 
     fun submitProduction() {
         viewModelScope.launch {
-            val state = _uiState.value
-            val product = state.selectedProduct ?: return@launch
-            val batch = state.selectedBatch ?: return@launch
-            val baskets = state.scannedBaskets
+//            val state = _uiState.value
+//            val product = state.selectedProduct ?: return@launch
+//            val batch = state.selectedBatch ?: return@launch
+//            val baskets = state.scannedBaskets
+//
+//            if (baskets.isEmpty()) {
+//                _uiState.update { it.copy(error = "請至少掃描一個籃子") }
+//                return@launch
+//            }
+//
+//            _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
+//
+//            val online = isOnline.value
+//            Timber.d("📤 Submitting production - isOnline: $online")
+//            var successCount = 0
+//            var failCount = 0
+//
+//            baskets.forEach { basket ->
+//                productionRepository.startProduction(
+//                    uid = basket.uid,
+//                    productId = product.id,
+//                    batchId = batch.id,
+//                    product = product,
+//                    batch = batch,
+//                    quantity = basket.quantity,
+//                    productionDate = batch.productionDate,
+//                    isOnline = online
+//                ).onSuccess {
+//                    successCount++
+//                }.onFailure {
+//                    failCount++
+//                }
+//            }
+//
+//            _uiState.update {
+//                it.copy(
+//                    isLoading = false,
+//                    successMessage = "✅ 成功: $successCount 個，失敗: $failCount 個",
+//                    scannedBaskets = emptyList(),
+//                    totalScanCount = 0
+//                )
+//            }
 
-            if (baskets.isEmpty()) {
-                _uiState.update { it.copy(error = "請至少掃描一個籃子") }
-                return@launch
-            }
+            val product = _uiState.value.selectedProduct ?: return@launch
+            val batch = _uiState.value.selectedBatch ?: return@launch
+            val baskets = _uiState.value.scannedBaskets
+            if (baskets.isEmpty()) return@launch
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-            val online = isOnline.value
-            Timber.d("📤 Submitting production - isOnline: $online")
-            var successCount = 0
-            var failCount = 0
+            // 1. 準備 Common Data
+            val productJson = json.encodeToString(product) // 需注入 Json
+            val batchJson = json.encodeToString(batch)
+            val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-            baskets.forEach { basket ->
-                productionRepository.startProduction(
-                    uid = basket.uid,
-                    productId = product.id,
-                    batchId = batch.id,
-                    product = product,
-                    batch = batch,
-                    quantity = basket.quantity,
-                    productionDate = batch.productionDate,
-                    isOnline = online
-                ).onSuccess {
-                    successCount++
-                }.onFailure {
-                    failCount++
-                }
+            val commonData = CommonDataDto(
+                product = productJson,
+                batch = batchJson,
+                updateBy = currentUser,
+                status = "IN_PRODUCTION" // 明確指定狀態
+            )
+
+            // 2. 準備 Items (籃子可能有不同數量)
+            val items = baskets.map {
+                BasketUpdateItemDto(
+                    rfid = it.uid,
+                    quantity = it.quantity // 每個籃子可能有不同數量
+                )
             }
 
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    successMessage = "✅ 成功: $successCount 個，失敗: $failCount 個",
-                    scannedBaskets = emptyList(),
-                    totalScanCount = 0
-                )
+            // 3. 統一呼叫
+            basketRepository.updateBasket(
+                updateType = "Production",
+                commonData = commonData,
+                items = items,
+                isOnline = isOnline.value
+            ).onSuccess {
+                _uiState.update {
+                    it.copy(isLoading = false, scannedBaskets = emptyList(), successMessage = "✅ 生產提交成功")
+                }
+            }.onFailure { error ->
+                _uiState.update { it.copy(isLoading = false, error = error.message) }
             }
         }
     }

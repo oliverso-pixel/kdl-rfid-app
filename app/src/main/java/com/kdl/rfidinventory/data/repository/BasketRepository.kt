@@ -5,31 +5,26 @@ import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.local.entity.PendingOperationEntity
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.api.ApiService
-import com.kdl.rfidinventory.data.remote.dto.request.BasketIdDto
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
 import com.kdl.rfidinventory.data.remote.dto.request.BulkUpdateRequest
-import com.kdl.rfidinventory.data.remote.dto.request.ClearRequest
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
-import com.kdl.rfidinventory.data.remote.dto.request.ScanRequest
-import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import timber.log.Timber
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * 籃子驗證結果
  */
-sealed class BasketValidationResult {
-    data class Valid(val basket: Basket) : BasketValidationResult()
-    data class NotRegistered(val uid: String) : BasketValidationResult()
-    data class InvalidStatus(val basket: Basket, val currentStatus: BasketStatus) : BasketValidationResult()
-    data class AlreadyInProduction(val basket: Basket) : BasketValidationResult()
-    data class Error(val message: String) : BasketValidationResult()
-}
+//sealed class BasketValidationResult {
+//    data class Error(val message: String) : BasketValidationResult()
+//}
 
 @Singleton
 class BasketRepository @Inject constructor(
@@ -37,83 +32,6 @@ class BasketRepository @Inject constructor(
     private val basketDao: BasketDao,
     private val pendingOperationDao: PendingOperationDao
 ) {
-    /**
-     * 檢查籃子是否可用於生產
-     * @param uid 籃子 UID
-     * @param isOnline 是否在線
-     * @return 驗證結果
-     */
-    suspend fun validateBasketForProduction(uid: String, isOnline: Boolean): BasketValidationResult = withContext(Dispatchers.IO) {
-        try {
-            if (isOnline) {
-                // 在線：從服務器檢查
-                Timber.d("🌐 Online: Validating basket from server: $uid")
-                val response = apiService.getBasketByRfid(uid)
-
-                if (response.isSuccessful && response.body() != null) {
-                    val apiBasketDto = response.body()!!
-                    // 這裡使用 apiBasketDto (ApiBasketDto) 或 BasketDetailResponse 進行轉換
-                    // 假設 ApiService 回傳的是 BasketDetailResponse (根據上面的定義)
-                    val basket = apiBasketDto.toBasket()
-
-                    // 更新本地緩存
-                    basketDao.insertBasket(basket.toEntity())
-
-                    when (basket.status) {
-                        BasketStatus.UNASSIGNED -> {
-                            Timber.d("✅ Basket valid: $uid")
-                            BasketValidationResult.Valid(basket)
-                        }
-                        // 如果狀態是 IN_PRODUCTION，代表已被佔用
-                        BasketStatus.IN_PRODUCTION -> {
-                            Timber.w("⚠️ Basket occupied: $uid")
-                            BasketValidationResult.AlreadyInProduction(basket)
-                        }
-                        else -> {
-                            BasketValidationResult.InvalidStatus(basket, basket.status)
-                        }
-                    }
-                } else if (response.code() == 404) {
-                    // 404 代表籃子不存在，視為未註冊
-                    BasketValidationResult.NotRegistered(uid)
-                } else {
-                    BasketValidationResult.Error("API Error: ${response.code()}")
-                }
-            } else {
-                // 離線：從本地數據庫檢查
-                Timber.d("📱 Offline: Validating basket from local database: $uid")
-                val entity = basketDao.getBasketByUid(uid)
-
-                if (entity != null) {
-                    val basket = entity.toBasket()
-
-                    // 檢查狀態
-                    when (basket.status) {
-                        BasketStatus.UNASSIGNED -> {
-                            Timber.d("✅ Basket is valid (local): $uid (UNASSIGNED)")
-                            BasketValidationResult.Valid(basket)
-                        }
-                        BasketStatus.IN_PRODUCTION -> {
-                            Timber.w("⚠️ Basket is already in production (local): $uid")
-                            BasketValidationResult.AlreadyInProduction(basket)
-                        }
-                        else -> {
-                            Timber.w("⚠️ Basket has invalid status (local): $uid (${basket.status})")
-                            BasketValidationResult.InvalidStatus(basket, basket.status)
-                        }
-                    }
-                } else {
-                    // 本地沒有這個籃子記錄
-                    Timber.w("⚠️ Basket not registered locally: $uid")
-                    BasketValidationResult.NotRegistered(uid)
-                }
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "❌ Error validating basket: $uid")
-            BasketValidationResult.Error(e.message ?: "驗證失敗")
-        }
-    }
-
     suspend fun getBasketByUid(uid: String): Result<Basket> = withContext(Dispatchers.IO) {
         try {
             val entity = basketDao.getBasketByUid(uid)
@@ -169,120 +87,132 @@ class BasketRepository @Inject constructor(
     }
 
     /**
-     * 清除籃子配置 (批量)
+     * 統一提交籃子更新 (Production, Receiving, Transfer, Clear)
      */
-    suspend fun clearBasketConfiguration(uids: List<String>, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun updateBasket(
+        updateType: String,
+        commonData: CommonDataDto,
+        items: List<BasketUpdateItemDto>,
+        isOnline: Boolean
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // 1. 建構 Request 物件
             val request = BulkUpdateRequest(
-                updateType = "Clear",
-                commonData = CommonDataDto(), // Clear 模式下 commonData 為空
-                baskets = uids.map { BasketIdDto(rfid = it) }
+                updateType = updateType,
+                commonData = commonData,
+                baskets = items
             )
 
             if (isOnline) {
-                // 2. Online: 呼叫批量 API
+                // Online: 呼叫 API
                 val response = apiService.bulkUpdateBaskets(request)
 
                 if (response.isSuccessful) {
-                    Timber.d("✅ Bulk clear success: ${response.body()?.updated_count} items")
-
-                    // 成功後，更新本地資料庫
-                    clearLocalBaskets(uids)
-
+                    Timber.d("✅ Bulk update ($updateType) success: ${items.size} items")
+                    // 更新本地 DB
+                    updateLocalDatabase(updateType, commonData, items)
                     Result.success(Unit)
                 } else {
                     val errorMsg = response.errorBody()?.string() ?: response.message()
-                    Timber.e("❌ Bulk clear failed: $errorMsg")
-                    Result.failure(Exception("清除失敗: $errorMsg"))
+                    Result.failure(Exception("提交失敗: $errorMsg"))
                 }
             } else {
-                // 3. Offline: 儲存到 PendingOperation
+                // Offline: 存入 PendingOperation
                 val payloadJson = Json.encodeToString(request)
-
-                // 為了簡化同步邏輯，我們可以將批量請求儲存為單一操作
-                // 或者如果後端同步只支援單筆，則需要拆分 (建議後端同步也支援 bulk)
-                // 這裡假設同步機制能處理這個 payload
                 val operation = PendingOperationEntity(
-                    operationType = OperationType.CLEAR_ASSOCIATION, // 需確認此 Enum 是否存在或需新增 BULK_UPDATE
-                    uid = "BULK-${System.currentTimeMillis()}", // 批量操作使用特殊 UID
+                    operationType = OperationType.valueOf(updateType.uppercase()), // 確保 Enum 存在
+                    uid = "BULK-${System.currentTimeMillis()}",
                     payload = payloadJson,
                     timestamp = System.currentTimeMillis()
                 )
                 pendingOperationDao.insertOperation(operation)
 
-                // 更新本地資料庫
-                clearLocalBaskets(uids)
+                // 更新本地 DB
+                updateLocalDatabase(updateType, commonData, items)
 
-                Timber.d("📱 Offline clear saved for ${uids.size} baskets")
+                Timber.d("📱 Offline bulk update ($updateType) saved")
                 Result.success(Unit)
             }
         } catch (e: Exception) {
-            Timber.e(e, "Clear basket configuration error")
+            Timber.e(e, "Submit bulk update error")
             Result.failure(e)
         }
     }
 
     /**
-     * 輔助方法：清除本地籃子資料
+     * 根據 updateType 和優先級更新本地資料庫
      */
-    private suspend fun clearLocalBaskets(uids: List<String>) {
-        uids.forEach { uid ->
-            val entity = basketDao.getBasketByUid(uid)
-            entity?.let {
-                basketDao.updateBasket(
-                    it.copy(
-                        productId = null,
-                        productName = null,
-                        batchId = null,
-                        warehouseId = null,
-                        productJson = null,
-                        batchJson = null,
-                        quantity = 0,
-                        status = BasketStatus.UNASSIGNED,
-                        productionDate = null,
-                        expireDate = null,
-                        lastUpdated = System.currentTimeMillis(),
-                        updateBy = null // 清除時也可以記錄 updateBy，視需求而定
-                    )
-                )
+    private suspend fun updateLocalDatabase(
+        updateType: String,
+        common: CommonDataDto,
+        items: List<BasketUpdateItemDto>
+    ) {
+        val currentTime = System.currentTimeMillis()
+        val today = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE)
+
+        items.forEach { item ->
+            val entity = basketDao.getBasketByUid(item.rfid) ?: return@forEach
+
+            // 1. 決定 Status (Item > Common > Default)
+            val targetStatusStr = item.status ?: common.status ?: when (updateType) {
+                "Production" -> "IN_PRODUCTION"
+                "Receiving", "Transfer" -> "IN_STOCK"
+                "Clear" -> "UNASSIGNED"
+                else -> entity.status.name
             }
+            val newStatus = try { BasketStatus.valueOf(targetStatusStr) } catch (e: Exception) { entity.status }
+
+            // 2. 決定 Warehouse (Item > Common > Original)
+            val newWarehouseId = item.warehouseId ?: common.warehouseId ?: entity.warehouseId
+
+            // 3. 決定 Quantity (Item > Common > Original)
+            val newQuantity = item.quantity ?: common.quantity ?: entity.quantity
+
+            // 4. 決定 UpdateBy
+            val newUpdateBy = common.updateBy ?: entity.updateBy
+
+            // 5. 根據 Type 處理特定邏輯
+            val updatedEntity = when (updateType) {
+                "Production" -> {
+                    // 生產模式：更新產品、批次
+                    // 注意：這裡假設 commonData.product 是 JSON String
+                    entity.copy(
+                        status = newStatus,
+                        quantity = newQuantity,
+                        productJson = common.product, // 生產通常是同一產品
+                        batchJson = common.batch,
+                        // 這裡為了效能，我們可能需要解析 JSON 來填入 productId/batchId 扁平欄位
+                        // 暫時簡化，實作時建議這裡做解析
+                        lastUpdated = currentTime,
+                        updateBy = newUpdateBy,
+                        productionDate = today // 或從 batch 解析
+                    )
+                }
+                "Clear" -> {
+                    // 清除模式
+                    entity.copy(
+                        status = BasketStatus.UNASSIGNED,
+                        quantity = 0,
+                        productId = null, productName = null, batchId = null,
+                        productJson = null, batchJson = null,
+                        warehouseId = null,
+                        lastUpdated = currentTime,
+                        updateBy = newUpdateBy
+                    )
+                }
+                else -> {
+                    // Receiving, Transfer, 一般更新
+                    entity.copy(
+                        status = newStatus,
+                        quantity = newQuantity,
+                        warehouseId = newWarehouseId,
+                        lastUpdated = currentTime,
+                        updateBy = newUpdateBy
+                    )
+                }
+            }
+            basketDao.updateBasket(updatedEntity)
         }
     }
-
-//    suspend fun updateBasket(basket: Basket, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-//        try {
-//            if (isOnline) {
-//                val request = UpdateBasketRequest(
-//                    productId = basket.product?.id,
-//                    batchId = basket.batch?.id,
-//                    quantity = basket.quantity,
-//                    status = basket.status.name,
-//                    productionDate = basket.productionDate
-//                )
-//                val response = apiService.updateBasket(basket.uid, request)
-//                if (response.success) {
-//                    basketDao.updateBasket(basket.toEntity())
-//                    Result.success(Unit)
-//                } else {
-////                    Result.failure(Exception(response.message ?: "更新失敗"))
-//                    Result.failure(Exception("更新失敗"))
-//                }
-//            } else {
-//                val operation = PendingOperationEntity(
-//                    operationType = OperationType.ADMIN_UPDATE,
-//                    uid = basket.uid,
-//                    payload = Json.encodeToString(basket),
-//                    timestamp = System.currentTimeMillis()
-//                )
-//                pendingOperationDao.insertOperation(operation)
-//                basketDao.updateBasket(basket.toEntity())
-//                Result.success(Unit)
-//            }
-//        } catch (e: Exception) {
-//            Result.failure(e)
-//        }
-//    }
 
     suspend fun deleteBasket(uid: String, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -320,74 +250,4 @@ class BasketRepository @Inject constructor(
         }
     }
 
-//    suspend fun clearBasketConfiguration(uids: List<String>, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-//        try {
-//            if (isOnline) {
-//                val request = ClearRequest(
-//                    basketUids = uids,
-//                    timestamp = System.currentTimeMillis().toString()
-//                )
-//                val response = apiService.markForClear(request)
-//                if (response.success) {
-//                    uids.forEach { uid ->
-//                        val entity = basketDao.getBasketByUid(uid)
-//                        entity?.let {
-//                            basketDao.updateBasket(
-//                                it.copy(
-//                                    productId = null,
-//                                    productName = null,
-//                                    batchId = null,
-//                                    warehouseId = null,
-//                                    productJson = null,
-//                                    batchJson = null,
-//                                    quantity = 0,
-//                                    status = BasketStatus.UNASSIGNED,
-//                                    productionDate = null,
-//                                    expireDate = null,
-//                                    lastUpdated = System.currentTimeMillis(),
-//                                    updateBy = null
-//                                )
-//                            )
-//                        }
-//                    }
-//                    Result.success(Unit)
-//                } else {
-//                    Result.failure(Exception(response.message ?: "清除失敗"))
-//                }
-//            } else {
-//                uids.forEach { uid ->
-//                    val operation = PendingOperationEntity(
-//                        operationType = OperationType.CLEAR_ASSOCIATION,
-//                        uid = uid,
-//                        payload = "",
-//                        timestamp = System.currentTimeMillis()
-//                    )
-//                    pendingOperationDao.insertOperation(operation)
-//
-//                    val entity = basketDao.getBasketByUid(uid)
-//                    entity?.let {
-//                        basketDao.updateBasket(
-//                            it.copy(
-//                                productId = null,
-//                                productName = null,
-//                                batchId = null,
-//                                warehouseId = null,
-//                                productJson = null,
-//                                batchJson = null,
-//                                quantity = 0,
-//                                status = BasketStatus.UNASSIGNED,
-//                                productionDate = null,
-//                                expireDate = null,
-//                                lastUpdated = System.currentTimeMillis(),
-//                                updateBy = null
-//                            )
-//                        )
-//                    }
-//                }
-//                Result.success(Unit)
-//            }
-//        } catch (e: Exception) {
-//            Result.failure(e)
-//        }
-//    }
 }

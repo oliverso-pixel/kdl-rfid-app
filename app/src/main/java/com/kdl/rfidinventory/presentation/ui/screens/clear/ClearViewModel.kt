@@ -7,7 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,7 +27,8 @@ class ClearViewModel @Inject constructor(
     private val scanManager: ScanManager,
     private val basketRepository: BasketRepository,
     private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao
+    private val pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ClearUiState())
@@ -275,27 +279,68 @@ class ClearViewModel @Inject constructor(
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
+//            val online = isOnline.value
+//            val uids = items.map { it.basket.uid }
+//
+//            basketRepository.clearBasketConfiguration(uids, online)
+//                .onSuccess {
+//                    _uiState.update {
+//                        it.copy(
+//                            isLoading = false,
+//                            scannedBaskets = emptyList(),
+//                            successMessage = "✅ 清除成功，共 ${uids.size} 個籃子\n可繼續掃描下一批"
+//                        )
+//                    }
+//                }
+//                .onFailure { error ->
+//                    _uiState.update {
+//                        it.copy(
+//                            isLoading = false,
+//                            error = "清除失敗: ${error.message}"
+//                        )
+//                    }
+//                }
             val online = isOnline.value
-            val uids = items.map { it.basket.uid }
+            val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-            basketRepository.clearBasketConfiguration(uids, online)
-                .onSuccess {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            scannedBaskets = emptyList(),
-                            successMessage = "✅ 清除成功，共 ${uids.size} 個籃子\n可繼續掃描下一批"
-                        )
-                    }
+            // 2. 準備 Common Data
+            // 清除操作：狀態設為 UNASSIGNED，其他欄位在 Repository 中會被清空
+            val commonData = CommonDataDto(
+                updateBy = currentUser,
+                status = "UNASSIGNED"
+            )
+
+            // 3. 準備 Items
+            // 清除操作通常也會將數量歸零
+            val updateItems = items.map {
+                BasketUpdateItemDto(
+                    rfid = it.basket.uid,
+                    quantity = 0
+                )
+            }
+
+            // 4. 統一呼叫
+            basketRepository.updateBasket(
+                updateType = "Clear",
+                commonData = commonData,
+                items = updateItems,
+                isOnline = online
+            ).onSuccess {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        scannedBaskets = emptyList(),
+                        successMessage = "✅ 清除成功，共 ${items.size} 個籃子\n可繼續掃描下一批"
+                    )
                 }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "清除失敗: ${error.message}"
-                        )
-                    }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "清除失敗: ${error.message}"
+                    )
                 }
+            }
         }
     }
 
