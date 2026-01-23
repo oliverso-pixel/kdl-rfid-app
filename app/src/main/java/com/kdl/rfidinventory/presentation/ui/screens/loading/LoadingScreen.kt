@@ -664,7 +664,7 @@ private fun RouteCard(
         // 獲取在當前倉庫有庫存的產品
         val itemsInWarehouse = route.items.filter { item ->
             warehouseBaskets.any { basket ->
-                basket.product?.id == item.productId &&
+                basket.product?.itemcode == item.productId &&
                         basket.warehouseId == selectedWarehouseId &&
                         basket.status == BasketStatus.IN_STOCK
             } || when (selectedMode) {

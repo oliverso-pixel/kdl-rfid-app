@@ -9,7 +9,8 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class DailyProductResponse(
-    @SerializedName("itemcode") val itemCode: String, // 對應 Product.id
+    @SerializedName("itemcode")
+    val itemCode: String,
     val barcodeId: String?,
     val qrcodeId: String?,
     val name: String,
@@ -22,8 +23,10 @@ data class DailyProductResponse(
  */
 @Serializable
 data class ProductionBatchResponse(
-    @SerializedName("batch_code") val batchCode: String, // 對應 Batch.id
-    @SerializedName("itemcode") val itemCode: String,    // 對應 Product.id
+    @SerializedName("batch_code")
+    val batchCode: String,
+    @SerializedName("itemcode")
+    val itemCode: String,
     val totalQuantity: Int,
     val remainingQuantity: Int,
     val productionDate: String?,

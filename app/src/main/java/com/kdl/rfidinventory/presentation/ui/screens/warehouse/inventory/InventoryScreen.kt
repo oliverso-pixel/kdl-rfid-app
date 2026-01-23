@@ -2,6 +2,7 @@ package com.kdl.rfidinventory.presentation.ui.screens.warehouse.inventory
 
 import android.os.Build
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +30,7 @@ import com.kdl.rfidinventory.presentation.ui.components.BasketCardMode
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
 import com.kdl.rfidinventory.presentation.ui.components.WarehouseSelectionCard
+import com.kdl.rfidinventory.util.Constants
 import com.kdl.rfidinventory.util.ScanMode
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -165,7 +167,7 @@ fun InventoryScreen(
                     BatchSelectionStep(
                         product = uiState.selectedProduct!!,
                         batches = uiState.productGroups
-                            .find { it.product.id == uiState.selectedProduct?.id }
+                            .find { it.product.itemcode == uiState.selectedProduct?.itemcode }
                             ?.batches ?: emptyList(),
                         onSelectBatch = { viewModel.selectBatch(it) },
                         onBack = { viewModel.deselectProduct() }
@@ -830,6 +832,7 @@ private fun ProductGroupCard(
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(2.dp, Color.Black),
         colors = CardDefaults.cardColors(
             containerColor = if (group.isCompleted) {
                 MaterialTheme.colorScheme.primaryContainer
@@ -845,9 +848,14 @@ private fun ProductGroupCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+
+            val imageUrl = group.product.imageUrl?.let { url ->
+                if (url.startsWith("http")) url else "${Constants.SERVER_URL}$url"
+            }
+
             // 產品圖片
             AsyncImage(
-                model = group.product.imageUrl,
+                model = imageUrl,
                 contentDescription = group.product.name,
                 modifier = Modifier
                     .size(60.dp)
@@ -1006,6 +1014,7 @@ private fun BatchGroupCard(
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(2.dp, Color.Black),
         colors = CardDefaults.cardColors(
             containerColor = if (batchGroup.isScanned) {
                 MaterialTheme.colorScheme.primaryContainer
@@ -1027,7 +1036,7 @@ private fun BatchGroupCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = batchGroup.batch.id,
+                        text = batchGroup.batch.batch_code,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -1246,7 +1255,7 @@ private fun CurrentInventoryHeader(
 
                 batch?.let {
                     Text(
-                        text = "批次: ${it.id}",
+                        text = "批次: ${it.batch_code}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )

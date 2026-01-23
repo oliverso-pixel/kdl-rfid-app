@@ -17,7 +17,7 @@ val json = Json {
 // DailyProductResponse -> Product
 fun DailyProductResponse.toProduct(): Product {
     return Product(
-        id = this.itemCode,
+        itemcode = this.itemCode,
         barcodeId = this.barcodeId?.toLongOrNull(),
         qrcodeId = this.qrcodeId,
         name = this.name,
@@ -29,7 +29,7 @@ fun DailyProductResponse.toProduct(): Product {
 // ProductionBatchResponse -> Batch
 fun ProductionBatchResponse.toBatch(): Batch {
     return Batch(
-        id = this.batchCode,
+        batch_code = this.batchCode,
         productId = this.itemCode,
         totalQuantity = this.totalQuantity,
         remainingQuantity = this.remainingQuantity,
@@ -42,9 +42,9 @@ fun ProductionBatchResponse.toBatch(): Batch {
 fun Basket.toEntity(): BasketEntity {
     return BasketEntity(
         uid = uid,
-        productId = product?.id,
+        productId = product?.itemcode,
         productName = product?.name,
-        batchId = batch?.id,
+        batchId = batch?.batch_code,
         warehouseId = warehouseId,
         productJson = product?.let {
             try {
@@ -77,8 +77,9 @@ fun BasketDetailResponse.toBasket(): Basket {
         if (jsonString.isBlank() || jsonString == "null") return@let null
         try {
             // 這裡假設後端 JSON String 的結構對應 DailyProductResponse
-            val dto = json.decodeFromString<DailyProductResponse>(jsonString)
-            dto.toProduct()
+//            val dto = json.decodeFromString<DailyProductResponse>(jsonString)
+//            dto.toProduct()
+            json.decodeFromString<Product>(jsonString)
         } catch (e: Exception) {
             Timber.e("❌ Failed to parse product JSON: $jsonString")
             null
@@ -89,8 +90,9 @@ fun BasketDetailResponse.toBasket(): Basket {
     val parsedBatch = batch?.let { jsonString ->
         if (jsonString.isBlank() || jsonString == "null") return@let null
         try {
-            val dto = json.decodeFromString<ProductionBatchResponse>(jsonString)
-            dto.toBatch()
+//            val dto = json.decodeFromString<ProductionBatchResponse>(jsonString)
+//            dto.toBatch()
+            json.decodeFromString<Batch>(jsonString)
         } catch (e: Exception) {
             Timber.e("❌ Failed to parse batch JSON: $jsonString")
             null
@@ -133,7 +135,7 @@ fun BasketEntity.toBasket(): Basket {
         if (!productId.isNullOrBlank() && !productName.isNullOrBlank()) {
             Timber.d("🔄 Using flat fields for product: $productId - $productName")
             Product(
-                id = productId,
+                itemcode = productId,
                 name = productName,
                 maxBasketCapacity = 60,
                 imageUrl = null
@@ -156,7 +158,7 @@ fun BasketEntity.toBasket(): Basket {
         if (!batchId.isNullOrBlank() && !productionDate.isNullOrBlank()) {
             Timber.d("🔄 Using flat fields for batch: $batchId")
             Batch(
-                id = batchId,
+                batch_code = batchId,
                 productId = productId ?: "",
                 totalQuantity = quantity,
                 remainingQuantity = quantity,

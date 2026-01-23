@@ -69,7 +69,7 @@ fun BasketListItem(
 
                 basket.batch?.let { batch ->
                     Text(
-                        text = "批次: ${batch.id}",
+                        text = "批次: ${batch.batch_code}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -8,7 +8,7 @@ import java.time.format.DateTimeFormatter
 
 @Serializable
 data class Batch(
-    val id: String,
+    val batch_code: String,
     val productId: String,
     val totalQuantity: Int,
     val remainingQuantity: Int,

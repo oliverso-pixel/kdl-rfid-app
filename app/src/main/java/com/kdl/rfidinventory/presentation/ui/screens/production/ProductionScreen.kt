@@ -387,7 +387,7 @@ private fun BatchSelectionCard(
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = selectedBatch.id,
+                        text = selectedBatch.batch_code,
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
@@ -475,7 +475,7 @@ private fun BatchSelectionDialog(
                                 .padding(16.dp)
                         ) {
                             Text(
-                                text = batch.id,
+                                text = batch.batch_code,
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Spacer(modifier = Modifier.height(4.dp))
@@ -521,7 +521,7 @@ private fun ConfirmProductionDialog(
                     Text("產品: ${it.name}", style = MaterialTheme.typography.bodyLarge)
                 }
                 batch?.let {
-                    Text("批次: ${it.id}", style = MaterialTheme.typography.bodyMedium)
+                    Text("批次: ${it.batch_code}", style = MaterialTheme.typography.bodyMedium)
                 }
                 Divider()
                 Text(

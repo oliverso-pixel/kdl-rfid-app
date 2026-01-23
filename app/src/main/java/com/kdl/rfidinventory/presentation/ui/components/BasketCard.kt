@@ -1,5 +1,6 @@
 package com.kdl.rfidinventory.presentation.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +22,7 @@ import com.kdl.rfidinventory.data.model.ScannedBasket
 import com.kdl.rfidinventory.data.model.getBasketStatusText
 import com.kdl.rfidinventory.data.model.getStatusErrorMessage
 import com.kdl.rfidinventory.presentation.ui.screens.warehouse.inventory.InventoryItemStatus
+import com.kdl.rfidinventory.presentation.ui.theme.BackgroundDark
 import com.kdl.rfidinventory.presentation.ui.theme.BasketStatusColors
 import kotlinx.coroutines.delay
 
@@ -157,8 +159,13 @@ fun BasketCard(
         modifier = modifier.fillMaxWidth(),
         colors = cardColors,
         border = if (borderColor != Color.Transparent) {
-            androidx.compose.foundation.BorderStroke(width = 2.dp, color = borderColor)
-        } else null
+            BorderStroke(width = 2.dp, color = borderColor)
+        } else if (cardColors == CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )) {
+            BorderStroke(width = 2.dp, color = BackgroundDark)
+        }
+        else null
     ) {
         Column(
             modifier = Modifier
@@ -222,7 +229,7 @@ fun BasketCard(
 
             // 批次信息
             basket.batch?.let { batch ->
-                InfoRow(label = "批次", value = batch.id)
+                InfoRow(label = "批次", value = batch.batch_code)
             }
 
             // 生產日期

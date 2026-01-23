@@ -13,6 +13,7 @@ import com.kdl.rfidinventory.data.remote.dto.response.BulkCreateResponse
 import com.kdl.rfidinventory.data.remote.dto.response.BulkUpdateResponse
 import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
 import com.kdl.rfidinventory.data.remote.dto.response.GenericResponse
+import com.kdl.rfidinventory.data.remote.dto.response.ProductListResponse
 import com.kdl.rfidinventory.data.remote.dto.response.ProductionBatchResponse
 import com.kdl.rfidinventory.data.remote.dto.response.WarehouseResponse
 import retrofit2.http.Body
@@ -46,6 +47,18 @@ interface ApiService {
         @Path("uid") uid: String,
         @Body request: UpdateBasketStatusRequest
     ): retrofit2.Response<GenericResponse>
+
+    // 獲取倉庫內的籃子列表 (Inventory 用)
+    @GET("warehouses/{id}/baskets")
+    suspend fun getWarehouseBaskets(
+        @Path("id") warehouseId: String
+    ): retrofit2.Response<List<BasketDetailResponse>>
+
+    // 獲取產品列表 (Inventory 用)
+    @GET("products/")
+    suspend fun getProducts(
+        @Query("is_active") isActive: Boolean = true
+    ): retrofit2.Response<ProductListResponse>
 
     // ==================== Shipping API ====================
     // ==================== Sampling API ====================

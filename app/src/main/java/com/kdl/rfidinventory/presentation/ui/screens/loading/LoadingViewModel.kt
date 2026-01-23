@@ -375,7 +375,7 @@ class LoadingViewModel @Inject constructor(
         mode: LoadingMode?
     ): List<Basket> {
         return warehouseBaskets.filter { basket ->
-            val basicMatch = basket.product?.id == item.productId &&
+            val basicMatch = basket.product?.itemcode == item.productId &&
                     basket.status == BasketStatus.IN_STOCK &&
                     basket.warehouseId == warehouseId
 
@@ -492,7 +492,7 @@ class LoadingViewModel @Inject constructor(
                 loadingRepository.getBasketByUid(uid)
                     .onSuccess { dbBasket ->
                         val reason = when {
-                            dbBasket.product?.id != selectedItem.productId ->
+                            dbBasket.product?.itemcode != selectedItem.productId ->
                                 "產品不匹配 (${dbBasket.product?.name ?: "未知"})"
                             dbBasket.warehouseId != _uiState.value.selectedWarehouseId ->
                                 "倉庫不匹配"

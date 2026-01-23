@@ -113,46 +113,103 @@ class WarehouseRepository @Inject constructor(
     /**
      * 獲取指定倉庫的所有籃子（按產品分類）
      */
+//    suspend fun getWarehouseBasketsByWarehouse(warehouseId: String): Result<List<Basket>> =
+//        withContext(Dispatchers.IO) {
+//            try {
+//                val allBaskets = basketDao.getAllBaskets().first()
+//
+//                // 調試：打印所有籃子的狀態
+//                Timber.d("📦 ========== Warehouse Baskets Debug ==========")
+//                Timber.d("Total baskets in DB: ${allBaskets.size}")
+//
+//                allBaskets.forEach { entity ->
+//                    Timber.d("Basket ${entity.uid.takeLast(8)}: warehouse=${entity.warehouseId}, status=${entity.status}")
+//                }
+//
+//                val warehouseBaskets = allBaskets
+//                    .filter { entity ->
+//                        // 修改過濾條件：只檢查 warehouseId
+//                        val matchWarehouse = entity.warehouseId == warehouseId
+//                        val isValidStatus = entity.status == BasketStatus.RECEIVED ||
+//                                entity.status == BasketStatus.IN_STOCK
+//
+//                        Timber.d("Basket ${entity.uid.takeLast(8)}: matchWarehouse=$matchWarehouse, isValidStatus=$isValidStatus")
+//
+//                        // 臨時調試：先只檢查 warehouse，忽略狀態
+//                        matchWarehouse
+//                    }
+//                    .map { it.toBasket() }
+//
+//                Timber.d("📦 Found ${warehouseBaskets.size} baskets in warehouse $warehouseId")
+//
+//                // 打印每個籃子的詳細信息
+//                warehouseBaskets.forEach { basket ->
+//                    Timber.d("  - ${basket.uid.takeLast(8)}: ${basket.product?.name}, status=${basket.status}, qty=${basket.quantity}")
+//                }
+//
+//                Result.success(warehouseBaskets)
+//            } catch (e: Exception) {
+//                Timber.e(e, "Failed to get warehouse baskets")
+//                Result.failure(e)
+//            }
+//        }
     suspend fun getWarehouseBasketsByWarehouse(warehouseId: String): Result<List<Basket>> =
         withContext(Dispatchers.IO) {
             try {
-                val allBaskets = basketDao.getAllBaskets().first()
+                // Online: 呼叫 API
+                val response = apiService.getWarehouseBaskets(warehouseId)
 
-                // 調試：打印所有籃子的狀態
-                Timber.d("📦 ========== Warehouse Baskets Debug ==========")
-                Timber.d("Total baskets in DB: ${allBaskets.size}")
+                if (response.isSuccessful && response.body() != null) {
+                    val dtos = response.body()!!
 
-                allBaskets.forEach { entity ->
-                    Timber.d("Basket ${entity.uid.takeLast(8)}: warehouse=${entity.warehouseId}, status=${entity.status}")
+                    // 使用擴充函數轉換 DTO -> Domain Model
+                    // 注意：toBasket() 已經包含了 JSON String 的解析邏輯
+                    val baskets = dtos.map { it.toBasket() }
+
+                    // 可選：同步到本地資料庫 (視需求而定，盤點通常需要最新數據)
+                    // basketDao.insertBaskets(baskets.map { it.toEntity() })
+
+                    Timber.d("✅ Loaded ${baskets.size} baskets from warehouse $warehouseId (API)")
+                    Result.success(baskets)
+                } else {
+                    // API 失敗，回退到本地資料庫 (Offline Support)
+                    Timber.w("⚠️ API failed: ${response.code()}, falling back to local DB")
+                    val localEntities = basketDao.getBasketsByWarehouse(
+                        warehouseId = warehouseId,
+                        statuses = BasketStatus.IN_STOCK // 假設盤點只看在庫
+                    )
+                    Result.success(localEntities.map { it.toBasket() })
                 }
-
-                val warehouseBaskets = allBaskets
-                    .filter { entity ->
-                        // 修改過濾條件：只檢查 warehouseId
-                        val matchWarehouse = entity.warehouseId == warehouseId
-                        val isValidStatus = entity.status == BasketStatus.RECEIVED ||
-                                entity.status == BasketStatus.IN_STOCK
-
-                        Timber.d("Basket ${entity.uid.takeLast(8)}: matchWarehouse=$matchWarehouse, isValidStatus=$isValidStatus")
-
-                        // 臨時調試：先只檢查 warehouse，忽略狀態
-                        matchWarehouse
-                    }
-                    .map { it.toBasket() }
-
-                Timber.d("📦 Found ${warehouseBaskets.size} baskets in warehouse $warehouseId")
-
-                // 打印每個籃子的詳細信息
-                warehouseBaskets.forEach { basket ->
-                    Timber.d("  - ${basket.uid.takeLast(8)}: ${basket.product?.name}, status=${basket.status}, qty=${basket.quantity}")
-                }
-
-                Result.success(warehouseBaskets)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to get warehouse baskets")
                 Result.failure(e)
             }
         }
+
+    // 2. 獲取產品列表
+    suspend fun getProducts(): Result<List<Product>> = withContext(Dispatchers.IO) {
+        try {
+            val response = apiService.getProducts(isActive = true)
+
+            if (response.isSuccessful && response.body() != null) {
+                val listResponse = response.body()!!
+                // 重用 DailyProductResponse 的擴充函數 toProduct()
+                val products = listResponse.items.map { it.toProduct() }
+
+                Timber.d("✅ Loaded ${products.size} products from API")
+                Result.success(products)
+            } else {
+                // API 失敗，回退到 Mock 數據 (防止空列表導致無法操作)
+                Timber.w("⚠️ API failed")
+                Result.success(mockProductionOrders().map {
+                    Product(it.productId, it.barcodeId, it.qrcodeId, it.productName, it.maxBasketCapacity, it.imageUrl)
+                })
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to get products")
+            Result.failure(e)
+        }
+    }
 
     /**
      * 更新籃子信息（用於盤點額外項）
@@ -243,7 +300,7 @@ class WarehouseRepository @Inject constructor(
             val productJson = product?.let {
                 Json.encodeToString(
                     Product(
-                        id = it.productId,
+                        itemcode = it.productId,
                         barcodeId = it.barcodeId,
                         qrcodeId = it.qrcodeId,
                         name = it.productName,

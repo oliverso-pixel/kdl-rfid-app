@@ -541,7 +541,7 @@ private fun ProductItem(
                 // 產品 ID
                 ProductInfoRow(
                     label = "ID:",
-                    value = product.id,
+                    value = product.itemcode,
                     highlight = searchQuery
                 )
 
@@ -689,7 +689,7 @@ private fun filterProducts(products: List<Product>, query: String): List<Product
 
     val lowerQuery = query.trim().lowercase()
     return products.filter { product ->
-        product.id.lowercase().contains(lowerQuery) ||
+        product.itemcode.lowercase().contains(lowerQuery) ||
                 product.name.lowercase().contains(lowerQuery) ||
                 (product.barcodeId?.toString()?.contains(lowerQuery) == true) ||
                 (product.qrcodeId?.lowercase()?.contains(lowerQuery) == true)

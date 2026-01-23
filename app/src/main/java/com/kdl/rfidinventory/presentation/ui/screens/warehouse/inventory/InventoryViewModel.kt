@@ -10,7 +10,6 @@ import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Batch
 import com.kdl.rfidinventory.data.model.Product
 import com.kdl.rfidinventory.data.model.Warehouse
-import com.kdl.rfidinventory.data.model.mockProductionOrders
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
@@ -18,6 +17,7 @@ import com.kdl.rfidinventory.data.repository.BasketValidationForInventoryResult
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -180,7 +180,7 @@ class InventoryViewModel @Inject constructor(
                 // 更新籃子信息
                 val result = warehouseRepository.updateBasketInfo(
                     uid = item.basket.uid,
-                    productId = product.id,
+                    productId = product.itemcode,
                     warehouseId = warehouse.id,
                     quantity = quantity,
                     isOnline = isOnline.value
@@ -403,13 +403,13 @@ class InventoryViewModel @Inject constructor(
         val basketsWithProduct = baskets.filter { it.product != null && it.batch != null }
 
         return basketsWithProduct
-            .groupBy { it.product!!.id }
+            .groupBy { it.product!!.itemcode }
             .map { (_, productBaskets) ->
                 val product = productBaskets.first().product!!
 
                 // 按批次分組
                 val batchGroups = productBaskets
-                    .groupBy { it.batch!!.id }
+                    .groupBy { it.batch!!.batch_code }
                     .map { (_, batchBaskets) ->
                         val batch = batchBaskets.first().batch!!
 
@@ -476,13 +476,13 @@ class InventoryViewModel @Inject constructor(
     // ==================== 步驟 4: 批次選擇（按貨盤點） ====================
 
     fun selectBatch(batch: Batch) {
-        Timber.d("📦 Selected batch: ${batch.id}")
+        Timber.d("📦 Selected batch: ${batch.batch_code}")
 
         val product = _uiState.value.selectedProduct!!
 
         // 找到該批次的所有籃子
         val batchBaskets = allWarehouseBaskets.filter {
-            it.product?.id == product.id && it.batch?.id == batch.id
+            it.product?.itemcode == product.itemcode && it.batch?.batch_code == batch.batch_code
         }
 
         val items = batchBaskets.map { basket ->
@@ -652,7 +652,7 @@ class InventoryViewModel @Inject constructor(
 
         val lowerQuery = query.trim().lowercase()
         return products.filter { product ->
-            product.id.lowercase().contains(lowerQuery) ||
+            product.itemcode.lowercase().contains(lowerQuery) ||
                     product.name.lowercase().contains(lowerQuery) ||
                     (product.barcodeId?.toString()?.contains(lowerQuery) == true) ||
                     (product.qrcodeId?.lowercase()?.contains(lowerQuery) == true)
@@ -687,23 +687,18 @@ class InventoryViewModel @Inject constructor(
         }
     }
 
-    /**
-     * TODO : API 供 EditExtraItemDialog 使用的產品列表
-     */
-    private fun loadProducts() {
-        val products = mockProductionOrders().map { order ->
-            Product(
-                id = order.productId,
-                barcodeId = order.barcodeId,
-                qrcodeId = order.qrcodeId,
-                name = order.productName,
-                maxBasketCapacity = order.maxBasketCapacity,
-                imageUrl = order.imageUrl
-            )
-        }
 
-        _uiState.update { it.copy(products = products) }
-        Timber.d("✅ Loaded ${products.size} products")
+    private fun loadProducts() {
+        viewModelScope.launch {
+            warehouseRepository.getProducts()
+                .onSuccess { products ->
+                    _uiState.update { it.copy(products = products) }
+                    Timber.d("✅ Loaded ${products.size} products")
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = "載入產品列表失敗") }
+                }
+        }
     }
 
     /**
@@ -810,7 +805,7 @@ class InventoryViewModel @Inject constructor(
                     val selectedBatch = _uiState.value.selectedBatch
 
                     // 檢查產品是否匹配
-                    if (basket.product?.id != selectedProduct?.id) {
+                    if (basket.product?.itemcode != selectedProduct?.itemcode) {
                         _uiState.update {
                             it.copy(
                                 isValidating = false,
@@ -828,20 +823,20 @@ class InventoryViewModel @Inject constructor(
                     }
 
                     // 檢查批次是否匹配
-                    if (basket.batch?.id != selectedBatch?.id) {
+                    if (basket.batch?.batch_code != selectedBatch?.batch_code) {
                         _uiState.update {
                             it.copy(
                                 isValidating = false,
                                 error = buildString {
                                     append("❌ 籃子 ${uid.takeLast(8)} ")
                                     basket.batch?.let { batch ->
-                                        append("屬於批次「${batch.id}」")
+                                        append("屬於批次「${batch.batch_code}」")
                                     } ?: append("無批次信息")
                                     append("，不在當前盤點範圍")
                                 }
                             )
                         }
-                        Timber.w("⚠️ Basket $uid belongs to different batch: ${basket.batch?.id}")
+                        Timber.w("⚠️ Basket $uid belongs to different batch: ${basket.batch?.batch_code}")
                         return
                     }
                 }
@@ -872,7 +867,7 @@ class InventoryViewModel @Inject constructor(
                     )
                 }
 
-                Timber.d("📦 Extra basket added: $uid, status=${basket.status}, product=${basket.product?.name}, batch=${basket.batch?.id}")
+                Timber.d("📦 Extra basket added: $uid, status=${basket.status}, product=${basket.product?.name}, batch=${basket.batch?.batch_code}")
             }
 
             is BasketValidationForInventoryResult.NotInWarehouse -> {
@@ -1034,9 +1029,9 @@ class InventoryViewModel @Inject constructor(
 
         _uiState.update { state ->
             val updatedGroups = state.productGroups.map { group ->
-                if (group.product.id == product.id) {
+                if (group.product.itemcode == product.itemcode) {
                     val updatedBatches = group.batches.map { batchGroup ->
-                        if (batchGroup.batch.id == batch.id) {
+                        if (batchGroup.batch.batch_code == batch.batch_code) {
                             batchGroup.copy(isScanned = true)
                         } else {
                             batchGroup
@@ -1056,7 +1051,7 @@ class InventoryViewModel @Inject constructor(
 
             state.copy(
                 productGroups = updatedGroups,
-                successMessage = "✅ 批次 ${batch.id} 盤點完成"
+                successMessage = "✅ 批次 ${batch.batch_code} 盤點完成"
             )
         }
     }
@@ -1069,7 +1064,7 @@ class InventoryViewModel @Inject constructor(
             _uiState.update { it.copy(isSubmitting = true) }
 
             // TODO: 實現提交邏輯
-            kotlinx.coroutines.delay(1000)
+            delay(1000)
 
             _uiState.update {
                 it.copy(
@@ -1167,11 +1162,11 @@ class InventoryViewModel @Inject constructor(
 
         val productSummaries = productGroups.map { group ->
             ProductInventorySummary(
-                productId = group.product.id,
+                productId = group.product.itemcode,
                 productName = group.product.name,
                 batches = group.batches.map { batchGroup ->
                     BatchInventorySummary(
-                        batchId = batchGroup.batch.id,
+                        batchId = batchGroup.batch.batch_code,
                         basketCount = batchGroup.baskets.size,
                         totalQuantity = batchGroup.totalQuantity,
                         isScanned = batchGroup.isScanned

@@ -334,7 +334,7 @@ private fun ProductDetailCard(
     onSelectMode: (LoadingMode) -> Unit
 ) {
     val status = item.completionStatus
-    val productBaskets = warehouseBaskets.filter { it.product?.id == item.productId }
+    val productBaskets = warehouseBaskets.filter { it.product?.itemcode == item.productId }
     val fullBaskets = productBaskets.filter {
         it.quantity == it.product?.maxBasketCapacity
     }

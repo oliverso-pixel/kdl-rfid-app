@@ -182,7 +182,7 @@ class LoadingRepository @Inject constructor(
                 LoadingItemRequest(
                     productId = first.loadingItem.productId,
                     productName = first.loadingItem.productName,
-                    batchId = first.basket.batch?.id,
+                    batchId = first.basket.batch?.batch_code,
                     basketUids = items.map { it.basket.uid },
                     scannedQuantity = items.sumOf { it.scannedQuantity },
                     expectedQuantity = items.sumOf { it.expectedQuantity },

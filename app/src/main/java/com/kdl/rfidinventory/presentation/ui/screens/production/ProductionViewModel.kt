@@ -76,7 +76,7 @@ class ProductionViewModel @Inject constructor(
                 .onSuccess { orders ->
                     val products = orders.map { order ->
                         Product(
-                            id = order.id,
+                            itemcode = order.itemcode,
                             barcodeId = order.barcodeId,
                             qrcodeId = order.qrcodeId,
                             name = order.name,
@@ -201,7 +201,7 @@ class ProductionViewModel @Inject constructor(
 
         if (query.length >= 6) {
             val filteredProducts = _uiState.value.products.filter { product ->
-                product.id.lowercase().contains(query.lowercase()) ||
+                product.itemcode.lowercase().contains(query.lowercase()) ||
                         product.name.lowercase().contains(query.lowercase()) ||
                         (product.barcodeId?.toString()?.contains(query) == true) ||
                         (product.qrcodeId?.lowercase()?.contains(query.lowercase()) == true)
@@ -236,37 +236,14 @@ class ProductionViewModel @Inject constructor(
         // 停止產品搜索掃描
         scanManager.stopScanning()
 
-        loadBatchesForProduct(product.id)
+        loadBatchesForProduct(product.itemcode)
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun loadBatchesForProduct(productId: String) {
-        // 使用 mockBatches() 函數並過濾對應的 productId
-//        val allBatches = mockBatches(productId)
-//        val filteredBatches = allBatches.filter { it.productId == productId }
-//
-//        Timber.d("📦 Loading batches for product: $productId, found: ${filteredBatches.size}")
-//
-//        _uiState.update {
-//            it.copy(
-//                batches = filteredBatches,
-//                showBatchDialog = true
-//            )
-//        }
-//
-//        // 如果只有一個批次，自動選擇
-//        if (filteredBatches.size == 1) {
-//            Timber.d("🎯 Auto-selecting single batch: ${filteredBatches.first().id}")
-//            viewModelScope.launch {
-//                kotlinx.coroutines.delay(300)
-//                selectBatch(filteredBatches.first())
-//            }
-//        }
         viewModelScope.launch {
-            // 使用 API 獲取當日批次
             productionRepository.getBatchesForDate()
                 .onSuccess { allBatches ->
-                    // 過濾出當前產品的批次
                     val filteredBatches = allBatches.filter { it.productId == productId }
 
                     _uiState.update {
@@ -276,7 +253,6 @@ class ProductionViewModel @Inject constructor(
                         )
                     }
 
-                    // 自動選擇邏輯...
                     if (filteredBatches.size == 1) {
                         selectBatch(filteredBatches.first())
                     }
@@ -313,78 +289,6 @@ class ProductionViewModel @Inject constructor(
             validatingUids.add(uid)
             _uiState.update { it.copy(isValidating = true) }
 
-//            val online = isOnline.value
-//            Timber.d("🌐 Validating basket - isOnline: $online")
-//            val validationResult = basketRepository.validateBasketForProduction(uid, online)
-//
-//            when (validationResult) {
-//                is BasketValidationResult.Valid -> {
-//                    Timber.d("✅ Basket validated successfully: $uid")
-//                    addNewBasket(uid, rssi, validationResult.basket)
-//                }
-//
-//                is BasketValidationResult.NotRegistered -> {
-//                    Timber.w("⚠️ Basket not registered: $uid")
-//                    _uiState.update {
-//                        it.copy(
-//                            error = "籃子 ${uid.takeLast(8)} 尚未登記，請先在「籃子管理」中登記此籃子",
-//                            isValidating = false
-//                        )
-//                    }
-//                    // 單次模式停止掃描
-//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-//                        scanManager.stopScanning()
-//                    }
-//                }
-//
-//                is BasketValidationResult.InvalidStatus -> {
-//                    Timber.w("⚠️ Basket has invalid status: $uid (${validationResult.currentStatus})")
-//                    val statusText = getBasketStatusText(validationResult.currentStatus)
-//                    _uiState.update {
-//                        it.copy(
-//                            error = "籃子 ${uid.takeLast(8)} 狀態為「${statusText}」，無法用於生產",
-//                            isValidating = false
-//                        )
-//                    }
-//                    // 單次模式停止掃描
-//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-//                        scanManager.stopScanning()
-//                    }
-//                }
-//
-//                is BasketValidationResult.AlreadyInProduction -> {
-//                    Timber.w("⚠️ Basket is already in production: $uid")
-//                    _uiState.update {
-//                        it.copy(
-//                            error = "籃子 ${uid.takeLast(8)} 已在生產中，無法重複使用",
-//                            isValidating = false
-//                        )
-//                    }
-//                    // 單次模式停止掃描
-//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-//                        scanManager.stopScanning()
-//                    }
-//                }
-//
-//                is BasketValidationResult.Error -> {
-//                    Timber.e("❌ Basket validation error: $uid - ${validationResult.message}")
-//                    _uiState.update {
-//                        it.copy(
-//                            error = "驗證籃子失敗: ${validationResult.message}",
-//                            isValidating = false
-//                        )
-//                    }
-//                    // 單次模式停止掃描
-//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-//                        scanManager.stopScanning()
-//                    }
-//                }
-//            }
-//
-//            // 移除驗證標記
-//            kotlinx.coroutines.delay(500)
-//            validatingUids.remove(uid)
-
             basketRepository.fetchBasket(uid, isOnline.value)
                 .onSuccess { basket ->
                     when (basket.status) {
@@ -394,7 +298,7 @@ class ProductionViewModel @Inject constructor(
                         }
                         BasketStatus.IN_PRODUCTION -> {
                             _uiState.update {
-                                it.copy(error = "籃子已在生產中 (批次: ${basket.batch?.id})")
+                                it.copy(error = "籃子已在生產中 (批次: ${basket.batch?.batch_code})")
                             }
                         }
                         else -> {
@@ -522,49 +426,6 @@ class ProductionViewModel @Inject constructor(
 
     fun submitProduction() {
         viewModelScope.launch {
-//            val state = _uiState.value
-//            val product = state.selectedProduct ?: return@launch
-//            val batch = state.selectedBatch ?: return@launch
-//            val baskets = state.scannedBaskets
-//
-//            if (baskets.isEmpty()) {
-//                _uiState.update { it.copy(error = "請至少掃描一個籃子") }
-//                return@launch
-//            }
-//
-//            _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
-//
-//            val online = isOnline.value
-//            Timber.d("📤 Submitting production - isOnline: $online")
-//            var successCount = 0
-//            var failCount = 0
-//
-//            baskets.forEach { basket ->
-//                productionRepository.startProduction(
-//                    uid = basket.uid,
-//                    productId = product.id,
-//                    batchId = batch.id,
-//                    product = product,
-//                    batch = batch,
-//                    quantity = basket.quantity,
-//                    productionDate = batch.productionDate,
-//                    isOnline = online
-//                ).onSuccess {
-//                    successCount++
-//                }.onFailure {
-//                    failCount++
-//                }
-//            }
-//
-//            _uiState.update {
-//                it.copy(
-//                    isLoading = false,
-//                    successMessage = "✅ 成功: $successCount 個，失敗: $failCount 個",
-//                    scannedBaskets = emptyList(),
-//                    totalScanCount = 0
-//                )
-//            }
-
             val product = _uiState.value.selectedProduct ?: return@launch
             val batch = _uiState.value.selectedBatch ?: return@launch
             val baskets = _uiState.value.scannedBaskets
@@ -572,8 +433,7 @@ class ProductionViewModel @Inject constructor(
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-            // 1. 準備 Common Data
-            val productJson = json.encodeToString(product) // 需注入 Json
+            val productJson = json.encodeToString(product)
             val batchJson = json.encodeToString(batch)
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
@@ -581,18 +441,16 @@ class ProductionViewModel @Inject constructor(
                 product = productJson,
                 batch = batchJson,
                 updateBy = currentUser,
-                status = "IN_PRODUCTION" // 明確指定狀態
+                status = "IN_PRODUCTION"
             )
 
-            // 2. 準備 Items (籃子可能有不同數量)
             val items = baskets.map {
                 BasketUpdateItemDto(
                     rfid = it.uid,
-                    quantity = it.quantity // 每個籃子可能有不同數量
+                    quantity = it.quantity
                 )
             }
 
-            // 3. 統一呼叫
             basketRepository.updateBasket(
                 updateType = "Production",
                 commonData = commonData,
