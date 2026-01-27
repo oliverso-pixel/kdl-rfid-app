@@ -1,4 +1,3 @@
-// data/remote/dto/response/ProductionDtos.kt
 package com.kdl.rfidinventory.data.remote.dto.response
 
 import com.google.gson.annotations.SerializedName
@@ -14,6 +13,7 @@ data class DailyProductResponse(
     val barcodeId: String?,
     val qrcodeId: String?,
     val name: String,
+    val btype: Int,
     val maxBasketCapacity: Int,
     val imageUrl: String?
 )
@@ -27,8 +27,14 @@ data class ProductionBatchResponse(
     val batchCode: String,
     @SerializedName("itemcode")
     val itemCode: String,
+
     val totalQuantity: Int,
+    val targetQuantity: Int,
+    val producedQuantity: Int,
     val remainingQuantity: Int,
+    val status: String,
+    val maxRepairs: Int,
+
     val productionDate: String?,
     val expireDate: String?
 )

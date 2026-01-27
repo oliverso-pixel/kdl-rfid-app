@@ -43,7 +43,7 @@ class WarehouseRepository @Inject constructor(
     private val pendingOperationDao: PendingOperationDao
 ) {
 
-    // 1. 獲取倉庫列表 (API 接駁)
+    // 1. 獲取倉庫列表
     suspend fun getWarehouses(): Result<List<Warehouse>> {
         return try {
             val response = apiService.getWarehouses()
@@ -186,7 +186,6 @@ class WarehouseRepository @Inject constructor(
             }
         }
 
-    // 2. 獲取產品列表
     suspend fun getProducts(): Result<List<Product>> = withContext(Dispatchers.IO) {
         try {
             val response = apiService.getProducts(isActive = true)
@@ -202,11 +201,35 @@ class WarehouseRepository @Inject constructor(
                 // API 失敗，回退到 Mock 數據 (防止空列表導致無法操作)
                 Timber.w("⚠️ API failed")
                 Result.success(mockProductionOrders().map {
-                    Product(it.productId, it.barcodeId, it.qrcodeId, it.productName, it.maxBasketCapacity, it.imageUrl)
+                    Product(it.productId, it.barcodeId, it.qrcodeId, it.productName, 1, it.maxBasketCapacity, it.imageUrl)
                 })
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to get products")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 根據產品和過期日期獲取 Batch 列表
+     */
+    suspend fun getBatchesByProductAndExpiry(
+        itemcode: String,
+        expireDate: String,
+        isOnline: Boolean
+    ): Result<List<Batch>> = withContext(Dispatchers.IO) {
+        try {
+            val response = apiService.getBatchesByProductAndExpiry(itemcode, expireDate)
+            if (response.isSuccessful && response.body() != null) {
+                val batches = response.body()!!.map { it.toBatch() }
+                Result.success(batches)
+            } else {
+//                Timber.w("⚠️ Offline mode: Cannot fetch batches")
+//                Result.success(emptyList())
+                Result.failure(Exception("獲取批次失敗: ${response.code()}"))
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to fetch batches")
             Result.failure(e)
         }
     }
@@ -304,6 +327,7 @@ class WarehouseRepository @Inject constructor(
                         barcodeId = it.barcodeId,
                         qrcodeId = it.qrcodeId,
                         name = it.productName,
+                        btype = 1,
                         maxBasketCapacity = it.maxBasketCapacity,
                         imageUrl = it.imageUrl
                     )

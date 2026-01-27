@@ -10,16 +10,20 @@ import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Batch
 import com.kdl.rfidinventory.data.model.Product
 import com.kdl.rfidinventory.data.model.Warehouse
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.BasketValidationForInventoryResult
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
+import com.kdl.rfidinventory.data.repository.json
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
 import timber.log.Timber
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -169,6 +173,7 @@ class InventoryViewModel @Inject constructor(
     fun updateExtraItem(
         item: InventoryItem,
         product: Product,
+        batch: Batch,
         quantity: Int
     ) {
         viewModelScope.launch {
@@ -176,77 +181,127 @@ class InventoryViewModel @Inject constructor(
 
             try {
                 val warehouse = _uiState.value.selectedWarehouse!!
+                val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-                // 更新籃子信息
-                val result = warehouseRepository.updateBasketInfo(
-                    uid = item.basket.uid,
-                    productId = product.itemcode,
+                // ✅ 驗證籃子類型
+                if (item.basket.type != null && item.basket.type != product.btype) {
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            error = "⚠️ 籃子類型不符！\n" +
+                                    "產品要求類型 ${product.btype}，" +
+                                    "但籃子為類型 ${item.basket.type}"
+                        )
+                    }
+                    return@launch
+                }
+
+                // ✅ 準備更新數據（與 Production 相同格式）
+                val simplifiedBatch = mapOf(
+                    "batch_code" to batch.batch_code,
+                    "itemcode" to batch.itemcode,
+                    "productionDate" to batch.productionDate,
+                    "expireDate" to batch.expireDate
+                )
+                val batchJson = json.encodeToString(simplifiedBatch)
+
+                val simplifiedProduct = Product(
+                    itemcode = product.itemcode,
+                    barcodeId = product.barcodeId,
+                    qrcodeId = product.qrcodeId,
+                    name = product.name,
+                    btype = product.btype,
+                    maxBasketCapacity = product.maxBasketCapacity,
+                    imageUrl = product.imageUrl
+                )
+                val productJson = json.encodeToString(simplifiedProduct)
+
+                val commonData = CommonDataDto(
+                    product = productJson,
+                    batch = batchJson,
                     warehouseId = warehouse.id,
-                    quantity = quantity,
-                    isOnline = isOnline.value
+                    updateBy = currentUser,
+                    status = "IN_STOCK"  // 盤點中的籃子應該是 IN_STOCK
                 )
 
-                result
-                    .onSuccess {
-                        // 更新本地列表
-                        val updatedBasket = item.basket.copy(
-                            product = product,
-                            warehouseId = warehouse.id,
-                            quantity = quantity,
-                            status = BasketStatus.IN_STOCK
-                        )
+                val items = listOf(
+                    BasketUpdateItemDto(
+                        rfid = item.basket.uid,
+                        quantity = quantity
+                    )
+                )
 
-                        _uiState.update { state ->
-                            val updatedItems = state.inventoryItems.map { existingItem ->
-                                if (existingItem.id == item.id) {
-                                    existingItem.copy(
-                                        basket = updatedBasket,
-                                        status = InventoryItemStatus.SCANNED // 轉為已掃描狀態
-                                    )
-                                } else {
-                                    existingItem
-                                }
-                            }
+                basketRepository.updateBasket(
+                    updateType = "Receiving",
+                    commonData = commonData,
+                    items = items,
+                    isOnline = isOnline.value
+                ).onSuccess {
+                    val updatedBasket = item.basket.copy(
+                        product = product,
+                        batch = batch,
+                        warehouseId = warehouse.id,
+                        quantity = quantity,
+                        status = BasketStatus.IN_STOCK
+                    )
 
-                            // 重新排序
-                            val sortedItems = updatedItems.sortedBy {
-                                when (it.status) {
-                                    InventoryItemStatus.EXTRA -> 0
-                                    InventoryItemStatus.PENDING -> 1
-                                    InventoryItemStatus.SCANNED -> 2
-                                }
-                            }
-
-                            state.copy(
-                                inventoryItems = sortedItems,
-                                statistics = calculateStatistics(sortedItems),
-                                isSubmitting = false,
-                                showEditDialog = false,
-                                editingItem = null,
-                                successMessage = "✅ 籃子信息已更新"
-                            )
-                        }
-
-                        // 更新全局籃子列表
-                        allWarehouseBaskets = allWarehouseBaskets.map { basket ->
-                            if (basket.uid == updatedBasket.uid) {
-                                updatedBasket
+                    _uiState.update { state ->
+                        val updatedItems = state.inventoryItems.map { existingItem ->
+                            if (existingItem.id == item.id) {
+                                existingItem.copy(
+                                    basket = updatedBasket,
+                                    status = InventoryItemStatus.SCANNED
+                                )
                             } else {
-                                basket
+                                existingItem
                             }
                         }
 
-                        Timber.d("✅ Basket updated: ${item.basket.uid} -> Product: ${product.name}, Qty: $quantity")
+                        // 重新排序
+                        val sortedItems = updatedItems.sortedBy {
+                            when (it.status) {
+                                InventoryItemStatus.EXTRA -> 0
+                                InventoryItemStatus.PENDING -> 1
+                                InventoryItemStatus.SCANNED -> 2
+                            }
+                        }
+
+                        state.copy(
+                            inventoryItems = sortedItems,
+                            statistics = calculateStatistics(sortedItems),
+                            isSubmitting = false,
+                            showEditDialog = false,
+                            editingItem = null,
+                            selectedProductForEdit = null,
+                            selectedBatchForEdit = null,
+                            availableBatches = emptyList(),
+                            successMessage = "✅ 籃子信息已更新"
+                        )
                     }
-                    .onFailure { error ->
-                        Timber.e(error, "Failed to update basket")
-                        _uiState.update {
-                            it.copy(
-                                isSubmitting = false,
-                                error = "更新失敗: ${error.message}"
-                            )
+
+                    // 更新全局籃子列表
+                    allWarehouseBaskets = allWarehouseBaskets.map { basket ->
+                        if (basket.uid == updatedBasket.uid) {
+                            updatedBasket
+                        } else {
+                            basket
                         }
                     }
+
+                    Timber.d("✅ Extra item updated: ${item.basket.uid}")
+                    Timber.d("   Product: ${product.name}")
+                    Timber.d("   Batch: ${batch.batch_code}")
+                    Timber.d("   Quantity: $quantity")
+
+                }.onFailure { error ->
+                    Timber.e(error, "Failed to update extra item")
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            error = "更新失敗: ${error.message}"
+                        )
+                    }
+                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to update extra item")
                 _uiState.update {
@@ -562,6 +617,144 @@ class InventoryViewModel @Inject constructor(
         }
     }
 
+    // ==================== 額外項 ====================
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    fun updateProductSearchQuery(query: String) {
+        _uiState.update { it.copy(productSearchQuery = query) }
+
+        if (query.length >= 6) {
+            val filteredProducts = filterProducts(_uiState.value.products, query)
+
+            if (filteredProducts.size == 1) {
+                Timber.d("🎯 Auto-selecting product: ${filteredProducts.first().name}")
+                viewModelScope.launch {
+                    delay(300)
+                    if (_uiState.value.showEditDialog) {
+                        _uiState.update {
+                            it.copy(selectedProductForEdit = filteredProducts.first())
+                        }
+                        dismissProductDialog()
+                    } else {
+                        selectProduct(filteredProducts.first())
+                    }
+                }
+            }
+        }
+    }
+
+    private fun filterProducts(products: List<Product>, query: String): List<Product> {
+        if (query.isBlank()) {
+            return products
+        }
+
+        val lowerQuery = query.trim().lowercase()
+        return products.filter { product ->
+            product.itemcode.lowercase().contains(lowerQuery) ||
+                    product.name.lowercase().contains(lowerQuery) ||
+                    (product.barcodeId?.toString()?.contains(lowerQuery) == true) ||
+                    (product.qrcodeId?.lowercase()?.contains(lowerQuery) == true)
+        }
+    }
+
+    fun showProductDialog() {
+        loadProducts()
+        _uiState.update {
+            it.copy(
+                showProductDialog = true,
+                productSearchQuery = ""
+            )
+        }
+
+        // 延遲啟動產品搜索掃描
+        viewModelScope.launch {
+            delay(300)
+            if (_uiState.value.showProductDialog) {
+                scanManager.startBarcodeScan(ScanContext.PRODUCT_SEARCH)
+            }
+        }
+    }
+
+    fun dismissProductDialog() {
+        scanManager.stopScanning()
+        _uiState.update {
+            it.copy(
+                showProductDialog = false,
+                productSearchQuery = ""
+            )
+        }
+    }
+
+    private fun loadProducts() {
+        viewModelScope.launch {
+            warehouseRepository.getProducts()
+                .onSuccess { products ->
+                    _uiState.update { it.copy(products = products) }
+                    Timber.d("✅ Loaded ${products.size} products")
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = "載入產品列表失敗") }
+                }
+        }
+    }
+
+    /**
+     * 根據產品和過期日期查詢 Batch
+     */
+    fun loadBatchesForProductAndExpiry(product: Product, expiryDate: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+
+            warehouseRepository.getBatchesByProductAndExpiry(
+                itemcode = product.itemcode,
+                expireDate = expiryDate,
+                isOnline = isOnline.value
+            )
+                .onSuccess { batches ->
+                    _uiState.update {
+                        it.copy(
+                            availableBatches = batches,
+                            isLoading = false
+                        )
+                    }
+
+                    Timber.d("✅ Loaded ${batches.size} batches")
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            availableBatches = emptyList(),
+                            isLoading = false,
+                            error = "獲取批次失敗: ${error.message}"
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * 選擇編輯用的 Batch
+     */
+    fun selectBatchForEdit(batch: Batch) {
+        _uiState.update {
+            it.copy(selectedBatchForEdit = batch)
+        }
+        Timber.d("✅ Selected batch for edit: ${batch.batch_code}")
+    }
+
+    /**
+     * 清除編輯用的 Batch 選擇
+     */
+    fun clearBatchSelection() {
+        _uiState.update {
+            it.copy(
+                selectedBatchForEdit = null,
+                availableBatches = emptyList()
+            )
+        }
+    }
+
+    // ==================== 其他 ====================
     /**
      * 處理倉庫選擇（通過 QR 碼）
      */
@@ -618,86 +811,6 @@ class InventoryViewModel @Inject constructor(
             } else {
                 scanManager.startRfidScan(_uiState.value.scanMode)
             }
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    fun updateProductSearchQuery(query: String) {
-        _uiState.update { it.copy(productSearchQuery = query) }
-
-        if (query.length >= 6) {
-            val filteredProducts = filterProducts(_uiState.value.products, query)
-
-            if (filteredProducts.size == 1) {
-                Timber.d("🎯 Auto-selecting product: ${filteredProducts.first().name}")
-                viewModelScope.launch {
-                    kotlinx.coroutines.delay(300)
-                    if (_uiState.value.showEditDialog) {
-                        _uiState.update {
-                            it.copy(selectedProductForEdit = filteredProducts.first())
-                        }
-                        dismissProductDialog()
-                    } else {
-                        selectProduct(filteredProducts.first())
-                    }
-                }
-            }
-        }
-    }
-
-    private fun filterProducts(products: List<Product>, query: String): List<Product> {
-        if (query.isBlank()) {
-            return products
-        }
-
-        val lowerQuery = query.trim().lowercase()
-        return products.filter { product ->
-            product.itemcode.lowercase().contains(lowerQuery) ||
-                    product.name.lowercase().contains(lowerQuery) ||
-                    (product.barcodeId?.toString()?.contains(lowerQuery) == true) ||
-                    (product.qrcodeId?.lowercase()?.contains(lowerQuery) == true)
-        }
-    }
-
-    fun showProductDialog() {
-        loadProducts()
-        _uiState.update {
-            it.copy(
-                showProductDialog = true,
-                productSearchQuery = ""
-            )
-        }
-
-        // 延遲啟動產品搜索掃描
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(300)
-            if (_uiState.value.showProductDialog) {
-                scanManager.startBarcodeScan(ScanContext.PRODUCT_SEARCH)
-            }
-        }
-    }
-
-    fun dismissProductDialog() {
-        scanManager.stopScanning()
-        _uiState.update {
-            it.copy(
-                showProductDialog = false,
-                productSearchQuery = ""
-            )
-        }
-    }
-
-
-    private fun loadProducts() {
-        viewModelScope.launch {
-            warehouseRepository.getProducts()
-                .onSuccess { products ->
-                    _uiState.update { it.copy(products = products) }
-                    Timber.d("✅ Loaded ${products.size} products")
-                }
-                .onFailure { error ->
-                    _uiState.update { it.copy(error = "載入產品列表失敗") }
-                }
         }
     }
 
@@ -909,6 +1022,104 @@ class InventoryViewModel @Inject constructor(
                 }
             }
         }
+//        basketRepository.fetchBasket(uid, online)
+//            .onSuccess { basket ->
+//                // 驗證倉庫
+//                if (basket.warehouseId != warehouse.id) {
+//                    _uiState.update {
+//                        it.copy(
+//                            isValidating = false,
+//                            error = "❌ 籃子 ${uid.takeLast(8)} 屬於倉庫 ${basket.warehouseId}"
+//                        )
+//                    }
+//                    return
+//                }
+//
+//                val mode = _uiState.value.inventoryMode
+//
+//                // 按貨盤點模式：檢查產品和批次是否匹配
+//                if (mode == InventoryMode.BY_PRODUCT) {
+//                    val selectedProduct = _uiState.value.selectedProduct
+//                    val selectedBatch = _uiState.value.selectedBatch
+//
+//                    // 檢查產品是否匹配
+//                    if (basket.product?.itemcode != selectedProduct?.itemcode) {
+//                        _uiState.update {
+//                            it.copy(
+//                                isValidating = false,
+//                                error = buildString {
+//                                    append("❌ 籃子 ${uid.takeLast(8)} ")
+//                                    basket.product?.let { product ->
+//                                        append("屬於產品「${product.name}」")
+//                                    } ?: append("無產品信息")
+//                                    append("，不在當前盤點範圍")
+//                                }
+//                            )
+//                        }
+//                        return
+//                    }
+//
+//                    // 檢查批次是否匹配
+//                    if (basket.batch?.batch_code != selectedBatch?.batch_code) {
+//                        _uiState.update {
+//                            it.copy(
+//                                isValidating = false,
+//                                error = buildString {
+//                                    append("❌ 籃子 ${uid.takeLast(8)} ")
+//                                    basket.batch?.let { batch ->
+//                                        append("屬於批次「${batch.batch_code}」")
+//                                    } ?: append("無批次信息")
+//                                    append("，不在當前盤點範圍")
+//                                }
+//                            )
+//                        }
+//                        return
+//                    }
+//                }
+//
+//                // 全部通過：作為額外項加入
+//                val statusDesc = when (basket.status) {
+//                    BasketStatus.UNASSIGNED -> "未分配"
+//                    BasketStatus.IN_PRODUCTION -> "生產中"
+//                    BasketStatus.RECEIVED -> "已收貨"
+//                    BasketStatus.IN_STOCK -> "在庫中"
+//                    BasketStatus.SHIPPED -> "已發貨"
+//                    BasketStatus.DAMAGED -> "已損壞"
+//                    else -> basket.status.toString()
+//                }
+//
+//                addExtraItem(basket)
+//
+//                _uiState.update {
+//                    it.copy(
+//                        isValidating = false,
+//                        successMessage = buildString {
+//                            append("⚠️ 額外項: ${uid.takeLast(8)}")
+//                            basket.product?.let { product ->
+//                                append(" (${product.name})")
+//                            }
+//                            append(" [$statusDesc]")
+//                        }
+//                    )
+//                }
+//
+//                Timber.d("📦 Extra basket added: $uid")
+//            }
+//            .onFailure { error ->
+//                val msg = if (error.message == "BASKET_NOT_REGISTERED" ||
+//                    error.message == "BASKET_NOT_FOUND_LOCAL") {
+//                    "❌ 籃子 ${uid.takeLast(8)} 未注冊"
+//                } else {
+//                    "❌ 驗證失敗: ${error.message}"
+//                }
+//
+//                _uiState.update {
+//                    it.copy(
+//                        isValidating = false,
+//                        error = msg
+//                    )
+//                }
+//            }
     }
 
     /**
@@ -1269,6 +1480,10 @@ data class InventoryUiState(
     val productSearchQuery: String = "",
     val selectedProductForEdit: Product? = null,
     val products: List<Product> = emptyList(),
+
+    val showBatchDialog: Boolean = false,
+    val selectedBatchForEdit: Batch? = null,
+    val availableBatches: List<Batch> = emptyList(),
 
     // 消息
     val error: String? = null,

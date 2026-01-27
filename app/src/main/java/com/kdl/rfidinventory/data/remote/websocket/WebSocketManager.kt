@@ -1,4 +1,3 @@
-// data/remote/websocket/WebSocketManager.kt
 package com.kdl.rfidinventory.data.remote.websocket
 
 import android.content.Context

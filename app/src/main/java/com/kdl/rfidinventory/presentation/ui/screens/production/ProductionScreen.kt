@@ -14,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -395,7 +397,7 @@ private fun BatchSelectionCard(
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "剩餘: ${selectedBatch.remainingQuantity} / ${selectedBatch.totalQuantity}",
+                        text = "剩餘: ${selectedBatch.producedQuantity} / ${selectedBatch.targetQuantity}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -467,27 +469,174 @@ private fun BatchSelectionDialog(
                 items(batches) { batch ->
                     Card(
                         onClick = { onBatchSelected(batch) },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = when (batch.status) {
+                                "PENDING" -> MaterialTheme.colorScheme.surfaceVariant
+                                "IN_PROGRESS" -> MaterialTheme.colorScheme.primaryContainer
+                                "COMPLETED" -> MaterialTheme.colorScheme.secondaryContainer
+                                else -> MaterialTheme.colorScheme.surface
+                            }
+                        )
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp)
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = batch.batch_code,
-                                style = MaterialTheme.typography.titleMedium
+//                            Text(
+//                                text = batch.batch_code,
+//                                style = MaterialTheme.typography.titleMedium
+//                            )
+//                            Spacer(modifier = Modifier.height(4.dp))
+//                            Text(
+//                                text = "生產日期: ${batch.productionDate}",
+//                                style = MaterialTheme.typography.bodySmall
+//                            )
+//                            Text(
+//                                text = "剩餘: ${batch.remainingQuantity} / ${batch.totalQuantity}",
+//                                style = MaterialTheme.typography.bodySmall,
+//                                color = MaterialTheme.colorScheme.onSurfaceVariant
+//                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = batch.batch_code,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                // 狀態標籤
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = when (batch.status) {
+                                        "PENDING" -> MaterialTheme.colorScheme.outline
+                                        "IN_PROGRESS" -> MaterialTheme.colorScheme.primary
+                                        "COMPLETED" -> MaterialTheme.colorScheme.secondary
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+                                ) {
+                                    Text(
+                                        text = batch.status,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider()
+
+                            // 生產進度
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "生產進度:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${batch.producedQuantity} / ${batch.targetQuantity}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (batch.isTargetReached()) {
+                                            Color(0xFF4CAF50)
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        }
+                                    )
+                                    Text(
+                                        text = "(${batch.getProductionProgress().toInt()}%)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            // 進度條
+                            LinearProgressIndicator(
+                                progress = { batch.getProductionProgress() / 100 },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
+                                color = if (batch.isTargetReached()) {
+                                    Color(0xFF4CAF50)
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                }
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "生產日期: ${batch.productionDate}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "剩餘: ${batch.remainingQuantity} / ${batch.totalQuantity}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+
+                            // 日期信息
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "生產日期:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = batch.productionDate,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+
+                                batch.expireDate?.let { expiry ->
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "到期日期:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = expiry,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 剩餘目標數量提示
+                            if (!batch.isTargetReached()) {
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Info,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "還需生產 ${batch.getRemainingTarget()} 個",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -208,10 +208,11 @@ fun InventoryScreen(
         EditExtraItemDialog(
             item = uiState.editingItem!!,
             onDismiss = { viewModel.dismissEditDialog() },
-            onConfirm = { product, quantity ->
+            onConfirm = { product, batch, quantity ->
                 viewModel.updateExtraItem(
                     item = uiState.editingItem!!,
                     product = product,
+                    batch = batch,
                     quantity = quantity
                 )
             },

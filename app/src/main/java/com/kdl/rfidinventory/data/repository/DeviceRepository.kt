@@ -1,4 +1,3 @@
-// data/repository/DeviceRepository.kt
 package com.kdl.rfidinventory.data.repository
 
 import com.kdl.rfidinventory.data.device.DeviceInfoProvider

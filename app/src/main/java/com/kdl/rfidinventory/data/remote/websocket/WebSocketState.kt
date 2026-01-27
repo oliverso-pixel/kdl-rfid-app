@@ -1,4 +1,3 @@
-// data/remote/websocket/WebSocketState.kt
 package com.kdl.rfidinventory.data.remote.websocket
 
 sealed class WebSocketState {

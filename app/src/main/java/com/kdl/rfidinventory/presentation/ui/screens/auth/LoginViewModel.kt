@@ -1,4 +1,3 @@
-// presentation/ui/screens/auth/LoginViewModel.kt
 package com.kdl.rfidinventory.presentation.ui.screens.auth
 
 import androidx.lifecycle.ViewModel

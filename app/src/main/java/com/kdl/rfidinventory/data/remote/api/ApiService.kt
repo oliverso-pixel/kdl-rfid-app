@@ -36,6 +36,12 @@ interface ApiService {
         @Query("target_date") targetDate: String
     ): retrofit2.Response<List<ProductionBatchResponse>>
 
+    // 獲取單個批次詳情
+    @GET("production/app/{batch_code}")
+    suspend fun getBatchDetail(
+        @Path("batch_code") batchCode: String
+    ): retrofit2.Response<ProductionBatchResponse>
+
     // ==================== Warehouse API ====================
     // 獲取倉庫列表
     @GET("warehouses/")
@@ -59,6 +65,17 @@ interface ApiService {
     suspend fun getProducts(
         @Query("is_active") isActive: Boolean = true
     ): retrofit2.Response<ProductListResponse>
+
+    /**
+     * 根據產品代碼和過期日期查詢批次 (Inventory 用)
+     * @param itemcode 產品代碼
+     * @param expireDate 過期日期 (格式: YYYY-MM-DD)
+     */
+    @GET("warehouses/trace-batch")
+    suspend fun getBatchesByProductAndExpiry(
+        @Query("itemcode") itemcode: String,
+        @Query("expire_date") expireDate: String
+    ): retrofit2.Response<List<ProductionBatchResponse>>
 
     // ==================== Shipping API ====================
     // ==================== Sampling API ====================

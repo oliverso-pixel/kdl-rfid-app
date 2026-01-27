@@ -21,6 +21,7 @@ fun DailyProductResponse.toProduct(): Product {
         barcodeId = this.barcodeId?.toLongOrNull(),
         qrcodeId = this.qrcodeId,
         name = this.name,
+        btype = this.btype,
         maxBasketCapacity = this.maxBasketCapacity,
         imageUrl = this.imageUrl
     )
@@ -30,9 +31,15 @@ fun DailyProductResponse.toProduct(): Product {
 fun ProductionBatchResponse.toBatch(): Batch {
     return Batch(
         batch_code = this.batchCode,
-        productId = this.itemCode,
+        itemcode = this.itemCode,
+
         totalQuantity = this.totalQuantity,
+        targetQuantity = this.targetQuantity,
+        producedQuantity = this.producedQuantity,
         remainingQuantity = this.remainingQuantity,
+        status = this.status,
+        maxRepairs = this.maxRepairs,
+
         productionDate = this.productionDate ?: "",
         expireDate = this.expireDate
     )
@@ -42,6 +49,7 @@ fun ProductionBatchResponse.toBatch(): Batch {
 fun Basket.toEntity(): BasketEntity {
     return BasketEntity(
         uid = uid,
+        type = type,
         productId = product?.itemcode,
         productName = product?.name,
         batchId = batch?.batch_code,
@@ -103,6 +111,7 @@ fun BasketDetailResponse.toBasket(): Basket {
     // 注意：這裡回傳的是 Domain Model，它的結構應該要乾淨易用
     return Basket(
         uid = rfid,
+        type = type,
         product = parsedProduct, // 這裡已經是完整的 Product 物件
         batch = parsedBatch,     // 這裡已經是完整的 Batch 物件
         warehouseId = warehouseId,
@@ -138,7 +147,8 @@ fun BasketEntity.toBasket(): Basket {
                 itemcode = productId,
                 name = productName,
                 maxBasketCapacity = 60,
-                imageUrl = null
+                imageUrl = null,
+                btype = 1
             )
         } else {
             Timber.w("⚠️ No product data available for basket: $uid")
@@ -159,7 +169,7 @@ fun BasketEntity.toBasket(): Basket {
             Timber.d("🔄 Using flat fields for batch: $batchId")
             Batch(
                 batch_code = batchId,
-                productId = productId ?: "",
+                itemcode = productId ?: "",
                 totalQuantity = quantity,
                 remainingQuantity = quantity,
                 productionDate = productionDate
@@ -171,6 +181,7 @@ fun BasketEntity.toBasket(): Basket {
 
     return Basket(
         uid = uid,
+        type = type,
         product = product,
         batch = batch,
         warehouseId = warehouseId,

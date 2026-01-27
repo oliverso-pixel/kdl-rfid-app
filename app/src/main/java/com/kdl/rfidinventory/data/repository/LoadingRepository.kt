@@ -1,4 +1,3 @@
-// LoadingRepository.kt
 package com.kdl.rfidinventory.data.repository
 
 import android.os.Build

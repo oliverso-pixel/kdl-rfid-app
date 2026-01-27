@@ -1,4 +1,3 @@
-// data/repository/AuthRepository.kt
 package com.kdl.rfidinventory.data.repository
 
 import com.kdl.rfidinventory.data.local.preferences.AuthPreferences

@@ -1,0 +1,6 @@
+*
+!.gitignore
+!app/build.gradle.kts
+!app/src/main/
+!app/src/main/**
+.DS_Store

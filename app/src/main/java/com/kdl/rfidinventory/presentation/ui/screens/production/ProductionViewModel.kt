@@ -81,7 +81,8 @@ class ProductionViewModel @Inject constructor(
                             qrcodeId = order.qrcodeId,
                             name = order.name,
                             maxBasketCapacity = order.maxBasketCapacity,
-                            imageUrl = order.imageUrl
+                            imageUrl = order.imageUrl,
+                            btype = order.btype
                         )
                     }
                     _uiState.update { it.copy(products = products, isLoading = false) }
@@ -210,7 +211,7 @@ class ProductionViewModel @Inject constructor(
             if (filteredProducts.size == 1) {
                 Timber.d("🎯 Auto-selecting product: ${filteredProducts.first().name}")
                 viewModelScope.launch {
-                    kotlinx.coroutines.delay(300)
+                    delay(300)
                     selectProduct(filteredProducts.first())
                 }
             }
@@ -244,7 +245,7 @@ class ProductionViewModel @Inject constructor(
         viewModelScope.launch {
             productionRepository.getBatchesForDate()
                 .onSuccess { allBatches ->
-                    val filteredBatches = allBatches.filter { it.productId == productId }
+                    val filteredBatches = allBatches.filter { it.itemcode == productId }
 
                     _uiState.update {
                         it.copy(
@@ -280,7 +281,6 @@ class ProductionViewModel @Inject constructor(
         // 檢查是否已經在列表中
         val existingBasketIndex = _uiState.value.scannedBaskets.indexOfFirst { it.uid == uid }
         if (existingBasketIndex != -1) {
-            // 重複掃描：更新計數
             updateExistingBasket(existingBasketIndex, uid, rssi)
             return
         }
@@ -294,7 +294,30 @@ class ProductionViewModel @Inject constructor(
                     when (basket.status) {
                         BasketStatus.UNASSIGNED -> {
                             Timber.d("✅ Basket valid for production: $uid")
-                            addNewBasket(uid, rssi, basket)
+
+                            val selectedProduct = _uiState.value.selectedProduct
+                            if (selectedProduct != null) {
+                                // 比對 basket.type 與 product.btype
+                                // 注意：你需要在 Basket 中添加 type 字段
+                                // 如果 API 回傳的 basket 沒有 type，可能需要從 BasketDetailResponse 中補上
+
+                                // 暫時假設從 basket.bid 欄位判斷類型
+                                val basketType = basket.type ?: 0  // 需要在 Basket 模型中添加 type 欄位
+
+                                if (basketType != selectedProduct.btype) {
+                                    _uiState.update {
+                                        it.copy(
+                                            error = "⚠️ 籃子類型不符！\n" +
+                                                    "產品要求類型 ${selectedProduct.btype}，" +
+                                                    "但籃子為類型 $basketType\n" +
+                                                    "請使用正確的籃子款式"
+                                        )
+                                    }
+//                                    return@onSuccess
+                                } else {
+                                    addNewBasket(uid, rssi, basket)
+                                }
+                            }
                         }
                         BasketStatus.IN_PRODUCTION -> {
                             _uiState.update {
@@ -433,9 +456,29 @@ class ProductionViewModel @Inject constructor(
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-            val productJson = json.encodeToString(product)
-            val batchJson = json.encodeToString(batch)
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
+
+            val simplifiedBatch = mapOf(
+                "batch_code" to batch.batch_code,
+                "itemcode" to batch.itemcode,
+                "productionDate" to batch.productionDate,
+                "expireDate" to batch.expireDate
+            )
+            val batchJson = json.encodeToString(simplifiedBatch)
+
+            val simplifiedProduct = Product(
+                itemcode = product.itemcode,
+                barcodeId = product.barcodeId,
+                qrcodeId = product.qrcodeId,
+                name = product.name,
+                btype = product.btype,
+                maxBasketCapacity = product.maxBasketCapacity,
+                imageUrl = product.imageUrl
+            )
+            val productJson = json.encodeToString(simplifiedProduct)
+
+//            val productJson = json.encodeToString(product)
+//            val batchJson = json.encodeToString(batch)
 
             val commonData = CommonDataDto(
                 product = productJson,
@@ -457,12 +500,127 @@ class ProductionViewModel @Inject constructor(
                 items = items,
                 isOnline = isOnline.value
             ).onSuccess {
+
+                if (isOnline.value) {
+                    refreshBatchAfterSubmit(batch.batch_code, baskets.size)
+                } else {
+                    updateBatchLocally(batch, baskets.sumOf { it.quantity })
+                }
+
                 _uiState.update {
-                    it.copy(isLoading = false, scannedBaskets = emptyList(), successMessage = "✅ 生產提交成功")
+                    it.copy(
+                        isLoading = false,
+                        scannedBaskets = emptyList(),
+                        totalScanCount = 0,
+                        successMessage = "✅ 生產提交成功"
+                    )
                 }
             }.onFailure { error ->
                 _uiState.update { it.copy(isLoading = false, error = error.message) }
             }
+        }
+    }
+
+    /**
+     * 提交後刷新 Batch 數據（在線模式）
+     */
+    private suspend fun refreshBatchAfterSubmit(batchCode: String, submittedCount: Int) {
+        Timber.d("🔄 Refreshing batch data: $batchCode")
+
+        productionRepository.getBatchDetail(batchCode)
+            .onSuccess { updatedBatch ->
+                // 更新 UI State 中的 selectedBatch
+                _uiState.update {
+                    it.copy(
+                        selectedBatch = updatedBatch,
+                        successMessage = buildString {
+                            append("✅ 生產提交成功！\n")
+                            append("已生產: ${updatedBatch.producedQuantity} / ${updatedBatch.targetQuantity}\n")
+
+                            val remaining = updatedBatch.getRemainingTarget()
+                            if (remaining > 0) {
+                                append("剩餘: $remaining 個")
+                            } else {
+                                append("已達成目標！")
+                            }
+                        }
+                    )
+                }
+
+                Timber.d("✅ Batch refreshed:")
+                Timber.d("   Target: ${updatedBatch.targetQuantity}")
+                Timber.d("   Produced: ${updatedBatch.producedQuantity}")
+                Timber.d("   Remaining: ${updatedBatch.getRemainingTarget()}")
+
+                // 如果達成目標，可以自動切換到下一個批次
+                if (updatedBatch.isTargetReached()) {
+                    handleBatchTargetReached(updatedBatch)
+                }
+            }
+            .onFailure { error ->
+                Timber.e(error, "Failed to refresh batch data")
+                // 不顯示錯誤，因為提交已經成功
+            }
+    }
+
+    /**
+     * 離線模式：手動更新本地 Batch 數據
+     */
+    private fun updateBatchLocally(batch: Batch, submittedQuantity: Int) {
+        val updatedBatch = batch.copy(
+            producedQuantity = batch.producedQuantity + submittedQuantity
+        )
+
+        _uiState.update {
+            it.copy(
+                selectedBatch = updatedBatch,
+                successMessage = buildString {
+                    append(" 生產提交成功（離線）\n")
+                    append("已生產: ${updatedBatch.producedQuantity} / ${updatedBatch.targetQuantity}")
+                }
+            )
+        }
+
+        Timber.d("📱 Batch updated locally: producedQuantity=${updatedBatch.producedQuantity}")
+    }
+
+    /**
+     * 處理批次目標達成
+     */
+    private suspend fun handleBatchTargetReached(batch: Batch) {
+        Timber.d("🎯 Batch target reached: ${batch.batch_code}")
+
+        // 延遲 2 秒後顯示提示
+        delay(2000)
+
+        _uiState.update {
+            it.copy(
+                successMessage = "🎉 批次 ${batch.batch_code} 已達成目標！\n" +
+                        "請選擇下一個批次繼續生產"
+            )
+        }
+
+        // 可選：自動重置選擇（讓用戶選擇新批次）
+        // resetBatchSelection()
+    }
+
+    /**
+     *  重置批次選擇（保留產品選擇）
+     */
+    private fun resetBatchSelection() {
+        scanManager.stopScanning()
+
+        _uiState.update {
+            it.copy(
+                selectedBatch = null,
+                scannedBaskets = emptyList(),
+                totalScanCount = 0
+            )
+        }
+
+        // 重新加載批次列表
+        _uiState.value.selectedProduct?.let { product ->
+            loadBatchesForProduct(product.itemcode)
         }
     }
 
@@ -471,7 +629,7 @@ class ProductionViewModel @Inject constructor(
 
         // 延遲啟動產品搜索掃描
         viewModelScope.launch {
-            kotlinx.coroutines.delay(300)
+            delay(300)
             if (_uiState.value.showProductDialog) {
                 scanManager.startBarcodeScan(ScanContext.PRODUCT_SEARCH)
             }

@@ -1,4 +1,3 @@
-// data/remote/dto/request/CreateBasketRequest.kt (新增)
 package com.kdl.rfidinventory.data.remote.dto.request
 
 data class CreateBasketRequest(
