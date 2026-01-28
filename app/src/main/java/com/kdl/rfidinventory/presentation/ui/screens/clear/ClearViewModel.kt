@@ -300,18 +300,15 @@ class ClearViewModel @Inject constructor(
 //                        )
 //                    }
 //                }
+
             val online = isOnline.value
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-            // 2. 準備 Common Data
-            // 清除操作：狀態設為 UNASSIGNED，其他欄位在 Repository 中會被清空
             val commonData = CommonDataDto(
                 updateBy = currentUser,
                 status = "UNASSIGNED"
             )
 
-            // 3. 準備 Items
-            // 清除操作通常也會將數量歸零
             val updateItems = items.map {
                 BasketUpdateItemDto(
                     rfid = it.basket.uid,
@@ -319,7 +316,6 @@ class ClearViewModel @Inject constructor(
                 )
             }
 
-            // 4. 統一呼叫
             basketRepository.updateBasket(
                 updateType = "Clear",
                 commonData = commonData,

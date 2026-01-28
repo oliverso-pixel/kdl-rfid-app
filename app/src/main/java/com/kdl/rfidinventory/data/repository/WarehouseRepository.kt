@@ -8,8 +8,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,12 +15,12 @@ import javax.inject.Singleton
 /**
  * 籃子驗證結果（用於收貨）
  */
-sealed class BasketValidationForReceivingResult {
-    data class Valid(val basket: Basket) : BasketValidationForReceivingResult()
-    data class NotRegistered(val uid: String) : BasketValidationForReceivingResult()
-    data class InvalidStatus(val basket: Basket, val currentStatus: BasketStatus) : BasketValidationForReceivingResult()
-    data class Error(val message: String) : BasketValidationForReceivingResult()
-}
+//sealed class BasketValidationForReceivingResult {
+//    data class Valid(val basket: Basket) : BasketValidationForReceivingResult()
+//    data class NotRegistered(val uid: String) : BasketValidationForReceivingResult()
+//    data class InvalidStatus(val basket: Basket, val currentStatus: BasketStatus) : BasketValidationForReceivingResult()
+//    data class Error(val message: String) : BasketValidationForReceivingResult()
+//}
 
 /**
  * 籃子驗證結果（用於盤點）
@@ -200,9 +198,10 @@ class WarehouseRepository @Inject constructor(
             } else {
                 // API 失敗，回退到 Mock 數據 (防止空列表導致無法操作)
                 Timber.w("⚠️ API failed")
-                Result.success(mockProductionOrders().map {
-                    Product(it.productId, it.barcodeId, it.qrcodeId, it.productName, 1, it.maxBasketCapacity, it.imageUrl)
-                })
+//                Result.success(mockProductionOrders().map {
+//                    Product(it.productId, it.barcodeId, it.qrcodeId, it.productName, 1, it.maxBasketCapacity, it.imageUrl)
+//                })
+                Result.success(emptyList())
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to get products")
@@ -268,7 +267,7 @@ class WarehouseRepository @Inject constructor(
                 delay(500)
 
                 // 更新本地數據庫
-                updateBasketLocally(uid, productId, warehouseId, quantity)
+//                updateBasketLocally(uid, productId, warehouseId, quantity)
 
                 Timber.d("✅ Basket updated successfully (online mode)")
                 Result.success(Unit)
@@ -294,7 +293,7 @@ class WarehouseRepository @Inject constructor(
                 // pendingOperationDao.insertOperation(operation)
 
                 // 更新本地數據庫
-                updateBasketLocally(uid, productId, warehouseId, quantity)
+//                updateBasketLocally(uid, productId, warehouseId, quantity)
 
                 Timber.d("✅ Basket updated successfully (offline mode)")
                 Result.success(Unit)
@@ -318,33 +317,33 @@ class WarehouseRepository @Inject constructor(
 
         if (entity != null) {
             // 獲取產品信息（從 mock 數據）
-            val product = mockProductionOrders().find { it.productId == productId }
+//            val product = mockProductionOrders().find { it.productId == productId }
 
-            val productJson = product?.let {
-                Json.encodeToString(
-                    Product(
-                        itemcode = it.productId,
-                        barcodeId = it.barcodeId,
-                        qrcodeId = it.qrcodeId,
-                        name = it.productName,
-                        btype = 1,
-                        maxBasketCapacity = it.maxBasketCapacity,
-                        imageUrl = it.imageUrl
-                    )
-                )
-            }
+//            val productJson = product?.let {
+//                Json.encodeToString(
+//                    Product(
+//                        itemcode = it.productId,
+//                        barcodeId = it.barcodeId,
+//                        qrcodeId = it.qrcodeId,
+//                        name = it.productName,
+//                        btype = 1,
+//                        maxBasketCapacity = it.maxBasketCapacity,
+//                        imageUrl = it.imageUrl
+//                    )
+//                )
+//            }
+//
+//            val updatedEntity = entity.copy(
+//                productId = productId,
+//                productName = product?.productName,
+//                productJson = productJson,
+//                warehouseId = warehouseId,
+//                quantity = quantity,
+//                status = BasketStatus.IN_STOCK,
+//                lastUpdated = System.currentTimeMillis()
+//            )
 
-            val updatedEntity = entity.copy(
-                productId = productId,
-                productName = product?.productName,
-                productJson = productJson,
-                warehouseId = warehouseId,
-                quantity = quantity,
-                status = BasketStatus.IN_STOCK,
-                lastUpdated = System.currentTimeMillis()
-            )
-
-            basketDao.updateBasket(updatedEntity)
+//            basketDao.updateBasket(updatedEntity)
 
             Timber.d("💾 Basket updated locally: $uid -> Product: $productId, Qty: $quantity")
         } else {

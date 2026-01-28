@@ -42,7 +42,7 @@ data class TransferUiState(
     val scanMode: ScanMode = ScanMode.SINGLE,
 
     val warehouses: List<Warehouse> = emptyList(),
-    val selectedWarehouse: Warehouse? = null, // 目標倉庫
+    val selectedWarehouse: Warehouse? = null,
 
     val scannedBaskets: List<ScannedTransferItem> = emptyList(),
 
@@ -313,14 +313,12 @@ class TransferViewModel @Inject constructor(
 
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-            // 1. Common Data
             val commonData = CommonDataDto(
                 warehouseId = targetWarehouse.id,
                 updateBy = currentUser,
-                status = "IN_STOCK" // 轉換後狀態仍為在庫
+                status = "IN_STOCK"
             )
 
-            // 2. Items (轉換通常不改變數量，但帶上目前數量是好習慣)
             val items = baskets.map {
                 BasketUpdateItemDto(
                     rfid = it.basket.uid,
@@ -328,7 +326,6 @@ class TransferViewModel @Inject constructor(
                 )
             }
 
-            // 3. 統一呼叫
             basketRepository.updateBasket(
                 updateType = "Transfer",
                 commonData = commonData,
@@ -353,7 +350,7 @@ class TransferViewModel @Inject constructor(
                 scannedBaskets = emptyList()
             )
         }
-        // 重新啟動條碼掃描以便選擇倉庫
+
         viewModelScope.launch {
             delay(300)
             scanManager.startBarcodeScan(ScanContext.WAREHOUSE_SEARCH)

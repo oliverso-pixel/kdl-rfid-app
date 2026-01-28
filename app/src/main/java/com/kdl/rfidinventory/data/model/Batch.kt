@@ -1,10 +1,6 @@
 package com.kdl.rfidinventory.data.model
 
-import android.os.Build
-import androidx.annotation.RequiresApi
 import kotlinx.serialization.Serializable
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 @Serializable
 data class Batch(

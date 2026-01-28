@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.getBasketStatusText
 import com.kdl.rfidinventory.presentation.ui.theme.BasketStatusColors
 import java.text.SimpleDateFormat

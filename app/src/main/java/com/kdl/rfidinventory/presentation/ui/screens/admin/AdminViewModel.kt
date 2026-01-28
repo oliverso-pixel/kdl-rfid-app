@@ -290,12 +290,23 @@ class AdminViewModel @Inject constructor(
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun initializeScanManager() {
-        Timber.d("🎯 Initializing ScanManager (ViewModel instance: ${this.hashCode()}, ScanManager instance: ${scanManager.hashCode()})")
-
+//        Timber.d("🎯 Initializing ScanManager (ViewModel instance: ${this.hashCode()}, ScanManager instance: ${scanManager.hashCode()})")
+//
+//        scanManager.initialize(
+//            scope = viewModelScope,
+//            scanMode = _scanMode,
+//            canStartScan = { true }
+//        )
         scanManager.initialize(
             scope = viewModelScope,
             scanMode = _scanMode,
-            canStartScan = { true }
+            canStartScan = {
+                when (_basketManagementMode.value) {
+                    BasketManagementMode.REGISTER -> true // 登記模式允許掃描
+                    BasketManagementMode.QUERY -> true    // 查詢模式允許掃描
+                    BasketManagementMode.LOCAL -> false   // 本地模式禁止掃描
+                }
+            }
         )
 
         Timber.d("✅ ScanManager initialized (ViewModel instance: ${this.hashCode()})")
@@ -304,14 +315,21 @@ class AdminViewModel @Inject constructor(
     private fun observeScanResults() {
         viewModelScope.launch {
             scanManager.scanResults.collect { result ->
+                val currentMode = _basketManagementMode.value
                 when (result) {
                     is ScanResult.BarcodeScanned -> {
-                        handleScannedBarcode(result.barcode)
+                        Timber.d("🔍 Barcode scan result received, current mode: $currentMode")
+                        handleScannedBarcode(result.barcode, currentMode)
                     }
                     is ScanResult.RfidScanned -> {
-                        handleScannedRfidTag(result.tag.uid)
+                        Timber.d("🔍 RFID scan result received, current mode: $currentMode")
+                        handleScannedRfidTag(result.tag.uid, currentMode)
                     }
-                    is ScanResult.ClearListRequested -> {}
+                    is ScanResult.ClearListRequested -> {
+                        if (currentMode == BasketManagementMode.REGISTER) {
+                            clearScannedUids()
+                        }
+                    }
                 }
             }
         }
@@ -327,55 +345,48 @@ class AdminViewModel @Inject constructor(
 
     fun setScanMode(mode: ScanMode) {
         viewModelScope.launch {
-            Timber.d("🔄 setScanMode called: $mode (current: ${_scanMode.value})")
-
             if (scanManager.scanState.value.isScanning) {
-                Timber.d("⏹️ Stopping scan before mode change")
                 scanManager.stopScanning()
                 delay(100)
             }
 
             _scanMode.value = mode
-            Timber.d("✅ _scanMode updated to: ${_scanMode.value}")
-
-            delay(50)
-
             scanManager.changeScanMode(mode)
-
-            Timber.d("🔄 Scan mode change complete")
         }
     }
 
-    private fun handleScannedBarcode(barcode: String) {
-        Timber.d("🔍 Barcode scanned in ${_basketManagementMode.value} mode: $barcode")
+    private fun handleScannedBarcode(barcode: String, mode: BasketManagementMode) {
+        Timber.d("🔍 handleScannedBarcode: barcode=$barcode, mode=$mode")
 
-        when (_basketManagementMode.value) {
+        when (mode) {
             BasketManagementMode.REGISTER -> {
-                registerBasket(barcode)
+                Timber.d("📝 Register mode: adding to list")
+                addToScannedList(barcode)
             }
             BasketManagementMode.QUERY -> {
-                queryBasket(barcode)
+                Timber.d("🔍 Query mode: calling fetchBasketDetail")
+                fetchBasketDetail(barcode)
             }
             BasketManagementMode.LOCAL -> {
-                // 本地搜尋
-                searchBaskets(barcode)
+                Timber.d("⚠️ Local mode: ignoring scan")
             }
         }
     }
 
-    private fun handleScannedRfidTag(uid: String) {
-        Timber.d("🔍 RFID scanned in ${_basketManagementMode.value} mode: $uid")
+    private fun handleScannedRfidTag(uid: String, mode: BasketManagementMode) {
+        Timber.d("🔍 handleScannedRfidTag: uid=$uid, mode=$mode")
 
-        when (_basketManagementMode.value) {
+        when (mode) {
             BasketManagementMode.REGISTER -> {
-                registerBasket(uid)
+                Timber.d("📝 Register mode: adding to list")
+                addToScannedList(uid)
             }
             BasketManagementMode.QUERY -> {
-                queryBasket(uid)
+                Timber.d("🔍 Query mode: calling fetchBasketDetail")
+                fetchBasketDetail(uid)
             }
             BasketManagementMode.LOCAL -> {
-                // 本地搜尋
-                searchBaskets(uid)
+                Timber.d("⚠️ Local mode: ignoring scan")
             }
         }
     }
@@ -385,7 +396,25 @@ class AdminViewModel @Inject constructor(
             if (scanManager.scanState.value.isScanning) {
                 scanManager.stopScanning()
             } else {
-                scanManager.startRfidScan(_scanMode.value)
+                // 根據模式決定掃描方式
+                when (_basketManagementMode.value) {
+                    BasketManagementMode.REGISTER -> {
+                        // 登記模式：使用當前設定的掃描模式
+                        scanManager.startRfidScan(_scanMode.value)
+                    }
+                    BasketManagementMode.QUERY -> {
+                        // 查詢模式：強制使用 SINGLE 模式
+                        if (_scanMode.value != ScanMode.SINGLE) {
+                            setScanMode(ScanMode.SINGLE)
+                            delay(50)
+                        }
+                        scanManager.startRfidScan(ScanMode.SINGLE)
+                    }
+                    BasketManagementMode.LOCAL -> {
+                        // 本地模式：不允許掃描
+                        _uiState.update { it.copy(error = "本地管理模式不支援掃描") }
+                    }
+                }
             }
         }
     }
@@ -460,65 +489,129 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    // [登記] 清除暫存
+    /**
+     * [登記模式] 加入暫存列表
+     */
+    private fun addToScannedList(uid: String) {
+        Timber.d("📝 addToScannedList called: $uid (current list size: ${_scannedUids.value.size})")
+
+        if (_scannedUids.value.contains(uid)) {
+            Timber.d("⚠️ UID already in list: $uid")
+            _uiState.update { it.copy(successMessage = "⚠️ UID 已在列表中: ${uid.takeLast(8)}") }
+        } else {
+            _scannedUids.update { currentSet ->
+                val newSet = currentSet + uid
+                Timber.d("✅ Added to list: $uid (new size: ${newSet.size})")
+                newSet
+            }
+            _uiState.update {
+                it.copy(successMessage = "✅ 已加入: ${uid.takeLast(8)} (共 ${_scannedUids.value.size} 個)")
+            }
+        }
+
+        // 單次模式：停止掃描
+        if (_scanMode.value == ScanMode.SINGLE) {
+            Timber.d("🛑 Single mode: stopping scan")
+            scanManager.stopScanning()
+        }
+    }
+
     fun submitRegistration() {
         val uids = _scannedUids.value.toList()
-        if (uids.isEmpty()) return
+        if (uids.isEmpty()) {
+            _uiState.update { it.copy(error = "請先掃描至少一個籃子") }
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isRegistering = true) }
 
-            basketRepository.bulkRegisterBaskets(uids, isOnline = _networkState.value is NetworkState.Connected)
-                .onSuccess { result ->
-                    val msg = if (result.isOffline) {
-                        "已離線保存 ${result.successCount} 個籃子"
-                    } else {
-                        "登記完成: 成功 ${result.successCount} / 總數 ${result.totalCount}"
-                    }
-                    _uiState.update {
-                        it.copy(isRegistering = false, successMessage = msg)
-                    }
-                    _scannedUids.value = emptySet() // 成功後清空暫存
+            basketRepository.bulkRegisterBaskets(
+                uids = uids,
+                isOnline = _networkState.value is NetworkState.Connected
+            ).onSuccess { result ->
+                val msg = if (result.isOffline) {
+                    "📱 已離線保存 ${result.successCount} 個籃子"
+                } else {
+                    "✅ 登記完成: 成功 ${result.successCount} / 總數 ${result.totalCount}"
                 }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isRegistering = false, error = e.message) }
-                }
+                _uiState.update { it.copy(isRegistering = false, successMessage = msg) }
+                _scannedUids.value = emptySet() // 成功後清空
+            }.onFailure { e ->
+                _uiState.update { it.copy(isRegistering = false, error = "提交失敗: ${e.message}") }
+            }
         }
     }
 
     // [登記] 清除暫存
     fun clearScannedUids() {
         _scannedUids.value = emptySet()
+        _uiState.update { it.copy(successMessage = "已清空暫存列表") }
     }
 
     // [登記] 移除單個
     fun removeScannedUid(uid: String) {
         _scannedUids.update { it - uid }
+        _uiState.update { it.copy(successMessage = "已移除: ${uid.takeLast(8)}") }
     }
 
     // 2. [查詢] 獲取詳情
     fun fetchBasketDetail(uid: String) {
+        Timber.d("🔍 fetchBasketDetail called: $uid")
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            basketRepository.fetchBasket(uid, isOnline = _networkState.value is NetworkState.Connected)
-                .onSuccess { basket ->
-                    _queriedBasket.value = basket
-                    _uiState.update { it.copy(isLoading = false) }
+            Timber.d("🔄 Loading state set to true")
+
+            basketRepository.fetchBasket(
+                uid = uid,
+                isOnline = _networkState.value is NetworkState.Connected
+            ).onSuccess { basket ->
+                Timber.d("✅ Basket fetched successfully: ${basket.uid}")
+                _queriedBasket.value = basket
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        successMessage = "✅ 查詢成功: ${uid.takeLast(8)}"
+                    )
                 }
-                .onFailure { error ->
-                    _uiState.update { it.copy(isLoading = false, error = "查詢失敗: ${error.message}") }
+
+                // 單次模式：停止掃描
+                if (_scanMode.value == ScanMode.SINGLE) {
+                    Timber.d("🛑 Single mode: stopping scan after query")
+                    scanManager.stopScanning()
                 }
+            }.onFailure { error ->
+                Timber.e(error, "❌ Failed to fetch basket: $uid")
+                _queriedBasket.value = null
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "查詢失敗: ${error.message}"
+                    )
+                }
+
+                // 單次模式：停止掃描
+                if (_scanMode.value == ScanMode.SINGLE) {
+                    Timber.d("🛑 Single mode: stopping scan after error")
+                    scanManager.stopScanning()
+                }
+            }
         }
     }
 
     // 3. [查詢] 更新籃子
-    fun updateBasketInfo(basket: Basket, newStatus: String?, newWarehouseId: String?, newDescription: String?) {
+    fun updateBasketInfo(
+        basket: Basket,
+        newStatus: String?,
+        newWarehouseId: String?,
+        newDescription: String?
+    ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-            // 使用通用的 submitBulkUpdate
             val itemDto = BasketUpdateItemDto(
                 rfid = basket.uid,
                 status = newStatus,
@@ -533,28 +626,52 @@ class AdminViewModel @Inject constructor(
                 items = listOf(itemDto),
                 isOnline = _networkState.value is NetworkState.Connected
             ).onSuccess {
-                _uiState.update { it.copy(isLoading = false, successMessage = "更新成功") }
-                fetchBasketDetail(basket.uid) // 重新整理
+                _uiState.update { it.copy(isLoading = false, successMessage = "✅ 更新成功") }
+                fetchBasketDetail(basket.uid)
             }.onFailure { error ->
-                _uiState.update { it.copy(isLoading = false, error = error.message) }
+                _uiState.update { it.copy(isLoading = false, error = "更新失敗: ${error.message}") }
             }
         }
     }
 
     fun setBasketManagementMode(mode: BasketManagementMode) {
-        _basketManagementMode.value = mode
-        Timber.d("📋 Basket management mode changed to: $mode")
+        viewModelScope.launch {
+            Timber.d("📋 setBasketManagementMode called: $mode (current: ${_basketManagementMode.value})")
 
-        // 切換模式時清空暫存，避免混淆
-        _scannedUids.value = emptySet()
-        _queriedBasket.value = null
-        _uiState.update { it.copy(error = null, successMessage = null) }
+            // 切換前停止掃描
+            if (scanManager.scanState.value.isScanning) {
+                Timber.d("🛑 Stopping scan before mode change")
+                scanManager.stopScanning()
+                delay(200) // 增加延遲確保停止完成
+            }
 
-        // 根據模式設定預設掃描行為
-        if (mode == BasketManagementMode.REGISTER) {
-            setScanMode(ScanMode.CONTINUOUS) // 登記通常是連續掃描
-        } else {
-            setScanMode(ScanMode.SINGLE)
+            // 更新模式
+            _basketManagementMode.value = mode
+            Timber.d("✅ Mode updated to: ${_basketManagementMode.value}")
+
+            // 清空暫存資料
+            _scannedUids.value = emptySet()
+            _queriedBasket.value = null
+            _uiState.update { it.copy(error = null, successMessage = null) }
+            Timber.d("🧹 Cleared temporary data")
+
+            // 根據模式設定掃描模式
+            when (mode) {
+                BasketManagementMode.REGISTER -> {
+                    Timber.d("🔄 Register mode: setting scan mode to CONTINUOUS")
+                    setScanMode(ScanMode.CONTINUOUS)
+                }
+                BasketManagementMode.QUERY -> {
+                    Timber.d("🔄 Query mode: setting scan mode to SINGLE")
+                    setScanMode(ScanMode.SINGLE)
+                }
+                BasketManagementMode.LOCAL -> {
+                    Timber.d("🔄 Local mode: setting scan mode to SINGLE (no scanning)")
+                    setScanMode(ScanMode.SINGLE)
+                }
+            }
+
+            Timber.d("✅ Mode change complete: ${_basketManagementMode.value}")
         }
     }
 
@@ -799,7 +916,7 @@ class AdminViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        Timber.d("🧹 AdminViewModel onCleared (instance: ${this.hashCode()})")
+        Timber.d("🧹 AdminViewModel onCleared")
         scanManager.cleanup()
         processingUids.clear()
     }

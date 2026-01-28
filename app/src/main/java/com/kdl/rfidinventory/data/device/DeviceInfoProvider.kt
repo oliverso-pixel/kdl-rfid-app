@@ -1,4 +1,3 @@
-// data/device/DeviceInfoProvider.kt
 package com.kdl.rfidinventory.data.device
 
 import android.content.Context
