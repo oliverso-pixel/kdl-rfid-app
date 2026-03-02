@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import androidx.core.content.edit
 
 @Singleton
 class PreferencesManager @Inject constructor(
@@ -30,7 +31,7 @@ class PreferencesManager @Inject constructor(
     }
 
     fun setWebSocketUrl(url: String) {
-        prefs.edit().putString(KEY_WEBSOCKET_URL, url).apply()
+        prefs.edit { putString(KEY_WEBSOCKET_URL, url) }
     }
 
     fun isWebSocketEnabled(): Boolean {
@@ -38,7 +39,7 @@ class PreferencesManager @Inject constructor(
     }
 
     fun setWebSocketEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_WEBSOCKET_ENABLED, enabled).apply()
+        prefs.edit { putBoolean(KEY_WEBSOCKET_ENABLED, enabled) }
     }
 
     fun getCustomDeviceName(): String? {
@@ -46,6 +47,6 @@ class PreferencesManager @Inject constructor(
     }
 
     fun setCustomDeviceName(name: String) {
-        prefs.edit().putString(KEY_CUSTOM_DEVICE_NAME, name).apply()
+        prefs.edit { putString(KEY_CUSTOM_DEVICE_NAME, name) }
     }
 }

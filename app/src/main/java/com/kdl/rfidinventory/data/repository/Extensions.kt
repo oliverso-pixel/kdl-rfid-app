@@ -7,6 +7,10 @@ import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
 import com.kdl.rfidinventory.data.remote.dto.response.ProductionBatchResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import timber.log.Timber
 
 val json = Json {
@@ -80,13 +84,9 @@ fun Basket.toEntity(): BasketEntity {
 }
 
 fun BasketDetailResponse.toBasket(): Basket {
-    // 1. 解析 Product (JSON String -> Product Object)
     val parsedProduct = product?.let { jsonString ->
         if (jsonString.isBlank() || jsonString == "null") return@let null
         try {
-            // 這裡假設後端 JSON String 的結構對應 DailyProductResponse
-//            val dto = json.decodeFromString<DailyProductResponse>(jsonString)
-//            dto.toProduct()
             json.decodeFromString<Product>(jsonString)
         } catch (e: Exception) {
             Timber.e("❌ Failed to parse product JSON: $jsonString")
@@ -94,26 +94,44 @@ fun BasketDetailResponse.toBasket(): Basket {
         }
     }
 
-    // 2. 解析 Batch (JSON String -> Batch Object)
+    val lenientJson = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
+
     val parsedBatch = batch?.let { jsonString ->
         if (jsonString.isBlank() || jsonString == "null") return@let null
         try {
-//            val dto = json.decodeFromString<ProductionBatchResponse>(jsonString)
-//            dto.toBatch()
-            json.decodeFromString<Batch>(jsonString)
+//            json.decodeFromString<Batch>(jsonString)
+            lenientJson.decodeFromString<Batch>(jsonString)
         } catch (e: Exception) {
-            Timber.e("❌ Failed to parse batch JSON: $jsonString")
-            null
+            try {
+                val jsonElement = json.parseToJsonElement(jsonString).jsonObject
+                Batch(
+                    batch_code = jsonElement["batch_code"]?.jsonPrimitive?.content ?: "",
+                    itemcode = jsonElement["itemcode"]?.jsonPrimitive?.content ?: "",
+                    totalQuantity = jsonElement["totalQuantity"]?.jsonPrimitive?.intOrNull ?: 0,
+                    targetQuantity = jsonElement["targetQuantity"]?.jsonPrimitive?.intOrNull ?: 0,
+                    producedQuantity = jsonElement["producedQuantity"]?.jsonPrimitive?.intOrNull ?: 0,
+                    remainingQuantity = jsonElement["remainingQuantity"]?.jsonPrimitive?.intOrNull ?: 0,
+                    status = jsonElement["status"]?.jsonPrimitive?.contentOrNull ?: "PENDING",
+                    maxRepairs = jsonElement["maxRepairs"]?.jsonPrimitive?.intOrNull ?: 1,
+                    productionDate = jsonElement["productionDate"]?.jsonPrimitive?.content ?: "",
+                    expireDate = jsonElement["expireDate"]?.jsonPrimitive?.contentOrNull
+                )
+            } catch (e2: Exception) {
+                Timber.e(e2, "❌ Failed to parse batch JSON (fallback): $jsonString")
+                null
+            }
         }
     }
 
-    // 3. 建立 Basket 物件
-    // 注意：這裡回傳的是 Domain Model，它的結構應該要乾淨易用
     return Basket(
         uid = rfid,
         type = type,
-        product = parsedProduct, // 這裡已經是完整的 Product 物件
-        batch = parsedBatch,     // 這裡已經是完整的 Batch 物件
+        product = parsedProduct,
+        batch = parsedBatch,
         warehouseId = warehouseId,
         quantity = quantity,
         status = try {
@@ -121,9 +139,9 @@ fun BasketDetailResponse.toBasket(): Basket {
         } catch (e: Exception) {
             BasketStatus.UNASSIGNED
         },
-        productionDate = parsedBatch?.productionDate, // 從解析後的 Batch 獲取日期
+        productionDate = parsedBatch?.productionDate,
         expireDate = parsedBatch?.expireDate,
-        lastUpdated = System.currentTimeMillis(), // 暫時使用當前時間，或是解析 lastUpdated 字串
+        lastUpdated = System.currentTimeMillis(),
         updateBy = updateBy
     )
 }

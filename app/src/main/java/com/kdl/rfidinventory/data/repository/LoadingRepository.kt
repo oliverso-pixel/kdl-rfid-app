@@ -108,17 +108,17 @@ class LoadingRepository @Inject constructor(
     /**
      * 獲取倉庫列表
      */
-    suspend fun getWarehouses(): Result<List<Warehouse>> {
-        return try {
-            // TODO: 替換為真實 API 調用
-            delay(500)
-            Result.success(mockWarehouses())
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to fetch warehouses")
-            delay(500)
-            Result.success(mockWarehouses())
-        }
-    }
+//    suspend fun getWarehouses(): Result<List<Warehouse>> {
+//        return try {
+//            // TODO: 替換為真實 API 調用
+//            delay(500)
+//            Result.success(mockWarehouses())
+//        } catch (e: Exception) {
+//            Timber.e(e, "Failed to fetch warehouses")
+//            delay(500)
+//            Result.success(mockWarehouses())
+//        }
+//    }
 
     /**
      * 根據產品和倉庫獲取可用籃子

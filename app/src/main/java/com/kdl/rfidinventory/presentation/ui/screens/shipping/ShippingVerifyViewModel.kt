@@ -6,11 +6,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.model.*
+import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
+import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
+import com.kdl.rfidinventory.data.repository.AuthRepository
+import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.BasketValidationForInventoryResult
 import com.kdl.rfidinventory.data.repository.LoadingRepository
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -51,23 +57,30 @@ data class VerifyItem(
 @HiltViewModel
 class ShippingVerifyViewModel @Inject constructor(
     private val scanManager: ScanManager,
+    private val basketRepository: BasketRepository,
+    private val webSocketManager: WebSocketManager,
     private val loadingRepository: LoadingRepository,
     private val warehouseRepository: WarehouseRepository,
-    private val pendingOperationDao: PendingOperationDao
+    private val pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ShippingVerifyUiState())
     val uiState: StateFlow<ShippingVerifyUiState> = _uiState.asStateFlow()
 
-    val networkState: StateFlow<NetworkState> = pendingOperationDao.getPendingCount()
-        .map { count ->
-            if (count > 0) NetworkState.Disconnected(count)
-            else NetworkState.Connected
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = NetworkState.Connected
-        )
+    val isOnline: StateFlow<Boolean> = webSocketManager.isOnline
+
+    val networkState: StateFlow<NetworkState> = combine(
+        isOnline,
+        pendingOperationDao.getPendingCount()
+    ) { online, pendingCount ->
+        if (online) NetworkState.Connected
+        else NetworkState.Disconnected(pendingCount)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = NetworkState.Disconnected(0)
+    )
 
     val scanState = scanManager.scanState
 
@@ -76,7 +89,7 @@ class ShippingVerifyViewModel @Inject constructor(
 
     init {
         Timber.d("📦 ShippingVerifyViewModel initialized")
-        loadRoutes()
+//        loadRoutes()
         initializeScanManager()
         observeScanResults()
         observeScanErrors()
@@ -285,7 +298,8 @@ class ShippingVerifyViewModel @Inject constructor(
                 ScanMode.SINGLE
             ),
             canStartScan = {
-                _uiState.value.currentStep == ShippingVerifyStep.SCANNING
+//                _uiState.value.currentStep == ShippingVerifyStep.SCANNING
+                true
             }
         )
     }
@@ -296,7 +310,7 @@ class ShippingVerifyViewModel @Inject constructor(
                 when (result) {
                     is ScanResult.BarcodeScanned -> handleScannedBarcode(result.barcode)
                     is ScanResult.RfidScanned -> handleScannedRfidTag(result.tag.uid)
-                    is ScanResult.ClearListRequested -> {}
+                    is ScanResult.ClearListRequested -> clearBaskets()
                 }
             }
         }
@@ -318,18 +332,18 @@ class ShippingVerifyViewModel @Inject constructor(
     }
 
     fun toggleScanFromButton() {
-        if (_uiState.value.currentStep != ShippingVerifyStep.SCANNING) {
-            _uiState.update { it.copy(error = "請先選擇路線") }
-            return
-        }
-
-        // 檢查是否可以掃描
-        if (!_uiState.value.canScan) {
-            _uiState.update {
-                it.copy(error = _uiState.value.scanDisabledReason ?: "此路線無法掃描驗證")
-            }
-            return
-        }
+//        if (_uiState.value.currentStep != ShippingVerifyStep.SCANNING) {
+//            _uiState.update { it.copy(error = "請先選擇路線") }
+//            return
+//        }
+//
+//        // 檢查是否可以掃描
+//        if (!_uiState.value.canScan) {
+//            _uiState.update {
+//                it.copy(error = _uiState.value.scanDisabledReason ?: "此路線無法掃描驗證")
+//            }
+//            return
+//        }
 
         viewModelScope.launch {
             if (scanManager.scanState.value.isScanning) {
@@ -342,12 +356,189 @@ class ShippingVerifyViewModel @Inject constructor(
 
     private fun handleScannedBarcode(barcode: String) {
         Timber.d("🔍 Processing barcode: $barcode")
-        processScannedBasket(barcode)
+//        processScannedBasket(barcode)
+        fetchAndValidateBasket(barcode)
     }
 
     private fun handleScannedRfidTag(uid: String) {
         Timber.d("🔍 Processing RFID tag: $uid")
-        processScannedBasket(uid)
+//        processScannedBasket(uid)
+        fetchAndValidateBasket(uid)
+    }
+
+    fun clearBaskets() {
+        scanManager.stopScanning()
+        _uiState.update {
+            it.copy(scannedBaskets = emptyList())
+        }
+    }
+
+    /**
+     * 驗證並添加籃子
+     */
+    private fun fetchAndValidateBasket(uid: String) {
+        // 防止重複驗證
+        if (validatingUids.contains(uid)) {
+            Timber.d("⏭️ Basket $uid is already being validated")
+            return
+        }
+
+        // 檢查是否已經在列表中
+        if (_uiState.value.scannedBaskets.any { it.basket.uid == uid }) {
+            _uiState.update { it.copy(error = "籃子已掃描: ${uid.takeLast(8)}") }
+            if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                scanManager.stopScanning()
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            validatingUids.add(uid)
+            _uiState.update { it.copy(isValidating = true) }
+
+            basketRepository.fetchBasket(uid, isOnline.value)
+                .onSuccess { basket ->
+                    // ✅ 只允許 IN_STOCK 或 UNASSIGNED 狀態
+                    when (basket.status) {
+                        BasketStatus.IN_STOCK, BasketStatus.UNASSIGNED -> {
+                            Timber.d("✅ Basket valid for shipping: $uid (${basket.status})")
+                            addBasket(basket)
+                        }
+                        else -> {
+                            Timber.w("⚠️ Invalid status for shipping: ${basket.status}")
+                            _uiState.update {
+                                it.copy(
+                                    isValidating = false,
+                                    error = "籃子 ${uid.takeLast(8)} 狀態錯誤（${getBasketStatusText(basket.status)}）\n只能出貨「在庫」或「未配置」狀態的籃子"
+                                )
+                            }
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    Timber.w("⚠️ Basket not found: $uid - ${error.message}")
+                    _uiState.update {
+                        it.copy(
+                            isValidating = false,
+                            error = "籃子 ${uid.takeLast(8)} 不存在或無法讀取"
+                        )
+                    }
+                }
+
+            _uiState.update { it.copy(isValidating = false) }
+            delay(300)
+            validatingUids.remove(uid)
+
+            if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                scanManager.stopScanning()
+            }
+        }
+    }
+
+    /**
+     * 添加籃子到列表
+     */
+    private fun addBasket(basket: Basket) {
+        val item = ScannedShippingItem(
+            id = UUID.randomUUID().toString(),
+            basket = basket
+        )
+
+        _uiState.update { state ->
+            state.copy(
+                scannedBaskets = state.scannedBaskets + item,
+                successMessage = " 籃子 ${basket.uid.takeLast(8)} 已添加"
+            )
+        }
+
+        if (_uiState.value.scanMode == ScanMode.SINGLE) {
+            scanManager.stopScanning()
+        }
+    }
+
+    fun removeBasket(uid: String) {
+        _uiState.update { state ->
+            state.copy(
+                scannedBaskets = state.scannedBaskets.filter { it.basket.uid != uid }
+            )
+        }
+        Timber.d("🗑️ Basket removed: $uid")
+    }
+
+    fun showConfirmDialog() {
+        if (_uiState.value.scannedBaskets.isEmpty()) {
+            _uiState.update { it.copy(error = "請至少掃描一個籃子") }
+            return
+        }
+
+        val hasInvalidStatus = _uiState.value.scannedBaskets.any {
+            it.basket.status != BasketStatus.IN_STOCK &&
+                    it.basket.status != BasketStatus.UNASSIGNED
+        }
+
+        if (hasInvalidStatus) {
+            _uiState.update { it.copy(error = "列表中有狀態錯誤的籃子，請先移除") }
+            return
+        }
+
+        _uiState.update { it.copy(showConfirmDialog = true) }
+    }
+
+    fun dismissConfirmDialog() {
+        _uiState.update { it.copy(showConfirmDialog = false) }
+    }
+
+    /**
+     * 確認出貨（批量更新狀態為 SHIPPED）
+     */
+    fun confirmShipping() {
+        viewModelScope.launch {
+            val items = _uiState.value.scannedBaskets
+
+            if (items.isEmpty()) {
+                _uiState.update { it.copy(error = "請至少掃描一個籃子") }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
+
+            val online = isOnline.value
+            val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
+
+            val commonData = CommonDataDto(
+                updateBy = currentUser,
+                status = "SHIPPED"
+            )
+
+            val updateItems = items.map {
+                BasketUpdateItemDto(
+                    rfid = it.basket.uid,
+                    quantity = it.basket.quantity
+                )
+            }
+
+            basketRepository.updateBasket(
+                updateType = "Shipping",
+                commonData = commonData,
+                items = updateItems,
+                isOnline = online
+            ).onSuccess {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        scannedBaskets = emptyList(),
+                        successMessage = " 出貨成功，共 ${items.size} 個籃子\n可繼續掃描下一批"
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "出貨失敗: ${error.message}"
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -417,7 +608,7 @@ class ShippingVerifyViewModel @Inject constructor(
             is BasketValidationForInventoryResult.Valid -> {
                 val basket = result.basket
 
-                // ✅ 檢查狀態：允許 LOADING 和 UNASSIGNED
+                // 檢查狀態：允許 LOADING 和 UNASSIGNED
                 if (basket.status != BasketStatus.LOADING &&
                     basket.status != BasketStatus.UNASSIGNED) {
                     _uiState.update {
@@ -429,7 +620,7 @@ class ShippingVerifyViewModel @Inject constructor(
                     return
                 }
 
-                // ✅ 作為額外項加入
+                // 作為額外項加入
                 addExtraItem(basket)
 
                 val statusNote = if (basket.status == BasketStatus.UNASSIGNED) {
@@ -600,7 +791,7 @@ class ShippingVerifyViewModel @Inject constructor(
     // ==================== 步驟 3: 提交驗證 ====================
 
     fun submitVerification() {
-        // ✅ 防止重覆提交
+        // 防止重覆提交
         if (_uiState.value.hasSubmitted) {
             _uiState.update {
                 it.copy(error = "此路線已完成驗證，無法重覆提交")
@@ -721,9 +912,16 @@ class ShippingVerifyViewModel @Inject constructor(
 
 // ==================== UI State ====================
 
+data class ScannedShippingItem(
+    val id: String,
+    val basket: Basket
+)
+
 data class ShippingVerifyUiState(
     val isLoading: Boolean = false,
     val isValidating: Boolean = false,
+    val scannedBaskets: List<ScannedShippingItem> = emptyList(),
+    val showConfirmDialog: Boolean = false,
     val isSubmitting: Boolean = false,
     val isLoadingRoutes: Boolean = false,
     val hasSubmitted: Boolean = false,

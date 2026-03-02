@@ -1,5 +1,6 @@
 package com.kdl.rfidinventory.presentation.ui.screens.admin
 
+import android.app.Activity
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.*
@@ -12,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -19,6 +21,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
+import timber.log.Timber
+import kotlin.system.exitProcess
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -29,11 +33,18 @@ fun AdminScreen(
     viewModel: AdminViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-//    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
     val baskets by viewModel.baskets.collectAsStateWithLifecycle()
-    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    var showExitDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        Timber.tag("BasketManagement").d("🎬 AdminScreen Screen composition started")
+    }
 
     // 錯誤提示
     uiState.error?.let { error ->
@@ -297,6 +308,7 @@ fun AdminScreen(
                     onClick = { viewModel.refreshRFIDInfo() }
                 )
             }
+
             // 系統資訊區
             SettingsSection(title = "系統資訊") {
                 SettingItem(
@@ -313,6 +325,17 @@ fun AdminScreen(
                 InfoItem(
                     title = "資料庫版本",
                     value = uiState.settings.databaseVersion.toString()
+                )
+            }
+
+            // 退出應用程式區塊
+            SettingsSection(title = "應用程式控制") {
+                SettingItem(
+                    icon = Icons.Default.ExitToApp,
+                    title = "退出應用程式",
+                    subtitle = "完全關閉應用程式",
+                    onClick = { showExitDialog = true },
+                    textColor = MaterialTheme.colorScheme.error
                 )
             }
         }
@@ -408,6 +431,46 @@ fun AdminScreen(
             onConfirm = { power ->
                 viewModel.setPower(power)
                 viewModel.dismissPowerDialog()
+            }
+        )
+    }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.ExitToApp,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = { Text("退出應用程式") },
+            text = {
+                Text(
+                    "確定要退出應用程式嗎？\n\n" +
+                            "• 所有未同步的數據將保留在本地\n" +
+                            "• 下次啟動時會自動嘗試同步"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        // 正常退出應用程式
+                        activity?.finishAffinity()
+                        exitProcess(0)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("確認退出")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) {
+                    Text("取消")
+                }
             }
         )
     }

@@ -3,6 +3,8 @@ package com.kdl.rfidinventory.presentation.navigation
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -138,12 +140,20 @@ fun NavGraph(
             )
         }
 
-        composable(Screen.BasketManagement.route) {
+        composable(
+            Screen.BasketManagement.route,
+            arguments = listOf()
+        ) { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry("admin")
+            }
+
             BasketManagementScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToDetail = { uid ->
                     navController.navigate(Screen.BasketDetail.createRoute(uid))
-                }
+                },
+                viewModel = hiltViewModel(parentEntry)
             )
         }
 

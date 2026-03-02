@@ -16,7 +16,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val pendingOperationDao: PendingOperationDao,
+    pendingOperationDao: PendingOperationDao,
     private val webSocketManager: WebSocketManager,
     private val authRepository: AuthRepository
 ) : ViewModel() {
@@ -151,7 +151,3 @@ class MainViewModel @Inject constructor(
         Timber.d("🧹 MainViewModel cleared")
     }
 }
-
-data class MainUiState(
-    val showLogoutDialog: Boolean = false
-)

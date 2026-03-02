@@ -20,8 +20,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.*
+import com.kdl.rfidinventory.presentation.ui.components.BasketCard
+import com.kdl.rfidinventory.presentation.ui.components.BasketCardMode
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
+import com.kdl.rfidinventory.presentation.ui.components.ShippingStatistics
 import com.kdl.rfidinventory.util.ScanMode
 import timber.log.Timber
 
@@ -36,6 +39,23 @@ fun ShippingVerifyScreen(
     val networkState by viewModel.networkState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
+
+    // 計算有效籃子數量
+    val validBasketCount = remember(uiState.scannedBaskets) {
+        uiState.scannedBaskets.count {
+            it.basket.status == BasketStatus.IN_STOCK ||
+                    it.basket.status == BasketStatus.UNASSIGNED
+        }
+    }
+
+    // 計算是否可以提交
+    val canSubmit = remember(uiState.scannedBaskets) {
+        uiState.scannedBaskets.isNotEmpty() &&
+                uiState.scannedBaskets.all {
+                    it.basket.status == BasketStatus.IN_STOCK ||
+                            it.basket.status == BasketStatus.UNASSIGNED
+                }
+    }
 
     // 錯誤提示
     LaunchedEffect(uiState.error) {
@@ -92,61 +112,312 @@ fun ShippingVerifyScreen(
             }
         },
         floatingActionButton = {
-            // 提交按鈕（僅可掃描、有驗證數據且未提交時顯示）
-            if (uiState.currentStep == ShippingVerifyStep.SCANNING &&
-                uiState.canScan &&
-                uiState.statistics.verifiedItems > 0 &&
-                !uiState.hasSubmitted) {
+            if (uiState.scannedBaskets.isNotEmpty()) {
                 ExtendedFloatingActionButton(
-                    text = { Text("提交驗證") },
-                    icon = { Icon(Icons.Default.Check, contentDescription = null) },
-                    onClick = { viewModel.submitVerification() },
-                    containerColor = MaterialTheme.colorScheme.primary
+                    text = {
+                        Text(
+                            if (canSubmit) {
+                                "確認出貨 (${uiState.scannedBaskets.size})"
+                            } else {
+                                "無法出貨 (有錯誤狀態)"
+                            }
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            if (canSubmit) Icons.Default.LocalShipping else Icons.Default.Warning,
+                            contentDescription = null
+                        )
+                    },
+                    onClick = { viewModel.showConfirmDialog() },
+                    containerColor = if (canSubmit) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    contentColor = if (canSubmit) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+            // 提交按鈕（僅可掃描、有驗證數據且未提交時顯示）
+//            if (uiState.currentStep == ShippingVerifyStep.SCANNING &&
+//                uiState.canScan &&
+//                uiState.statistics.verifiedItems > 0 &&
+//                !uiState.hasSubmitted) {
+//                ExtendedFloatingActionButton(
+//                    text = { Text("提交驗證") },
+//                    icon = { Icon(Icons.Default.Check, contentDescription = null) },
+//                    onClick = { viewModel.submitVerification() },
+//                    containerColor = MaterialTheme.colorScheme.primary
+//                )
+//            }
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // 提示卡片
+            item {
+                ShippingInfoCard()
+            }
+
+            // 掃描設置
+            item {
+                ScanSettingsCard(
+                    scanMode = uiState.scanMode,
+                    isScanning = scanState.isScanning,
+                    scanType = scanState.scanType,
+                    isValidating = uiState.isValidating,
+                    onModeChange = { viewModel.setScanMode(it) },
+                    onToggleScan = { viewModel.toggleScanFromButton() },
+                    statisticsContent = {
+                        ShippingStatistics(
+                            basketCount = uiState.scannedBaskets.size,
+                            validBasketCount = validBasketCount,
+                            isScanning = scanState.isScanning,
+                            onClearBaskets = { viewModel.clearBaskets() }
+                        )
+                    },
+                    helpText = "• 只能出貨「在庫」或「未配置」狀態的籃子\n• RFID：點擊按鈕進行掃描\n• 條碼：使用實體掃碼槍"
+                )
+            }
+
+            // 已掃描籃子列表
+            if (uiState.scannedBaskets.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "已掃描籃子 (${uiState.scannedBaskets.size})",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+
+                        val invalidCount = uiState.scannedBaskets.size - validBasketCount
+
+                        if (invalidCount > 0) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.errorContainer
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                    Text(
+                                        text = "$invalidCount 個錯誤",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(
+                    items = uiState.scannedBaskets,
+                    key = { item -> item.id }
+                ) { item ->
+                    BasketCard(
+                        basket = item.basket,
+                        mode = BasketCardMode.SHIPPING,
+                        isValidStatus = item.basket.status == BasketStatus.IN_STOCK ||
+                                item.basket.status == BasketStatus.UNASSIGNED,
+                        maxCapacity = item.basket.product?.maxBasketCapacity,
+                        onQuantityChange = {},
+                        onRemove = { viewModel.removeBasket(item.basket.uid) }
+                    )
+                }
+            }
+        }
+//        Column(
+//            modifier = Modifier
+//                .fillMaxSize()
+//                .padding(paddingValues)
+//        ) {
+//            // 步驟指示器
+//            ShippingVerifyStepIndicator(currentStep = uiState.currentStep)
+//
+//            // 主要內容
+//            when (uiState.currentStep) {
+//                ShippingVerifyStep.SELECT_ROUTE -> {
+//                    RouteSelectionStep(
+//                        routes = uiState.routes,
+//                        isLoading = uiState.isLoadingRoutes,
+//                        onSelectRoute = { viewModel.selectRoute(it) }
+//                    )
+//                }
+//
+//                ShippingVerifyStep.SCANNING -> {
+//                    VerifyScanningStep(
+//                        route = uiState.selectedRoute!!,
+//                        items = uiState.verifyItems,
+//                        statistics = uiState.statistics,
+//                        scanMode = uiState.scanMode,
+//                        isScanning = scanState.isScanning,
+//                        scanType = scanState.scanType,
+//                        isValidating = uiState.isValidating,
+//                        isSubmitted = uiState.hasSubmitted,
+//                        canScan = uiState.canScan,
+//                        scanDisabledReason = uiState.scanDisabledReason,
+//                        onModeChange = { viewModel.setScanMode(it) },
+//                        onToggleScan = { viewModel.toggleScanFromButton() },
+//                        onRemoveItem = { viewModel.removeItem(it) },
+//                        onBack = { viewModel.resetVerification() }
+//                    )
+//                }
+//
+//                else -> {}
+//            }
+//        }
+
+        // 確認對話框
+        if (uiState.showConfirmDialog) {
+            ConfirmShippingDialog(
+                items = uiState.scannedBaskets,
+                onDismiss = { viewModel.dismissConfirmDialog() },
+                onConfirm = { viewModel.confirmShipping() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShippingInfoCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.LocalShipping,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "📦 出貨驗證",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "• 掃描籃子後將狀態更新為「已出貨」\n• 只能出貨「在庫」或「未配置」狀態的籃子\n• 出貨後籃子將從庫存中移除",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
         }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            // 步驟指示器
-            ShippingVerifyStepIndicator(currentStep = uiState.currentStep)
+    }
+}
 
-            // 主要內容
-            when (uiState.currentStep) {
-                ShippingVerifyStep.SELECT_ROUTE -> {
-                    RouteSelectionStep(
-                        routes = uiState.routes,
-                        isLoading = uiState.isLoadingRoutes,
-                        onSelectRoute = { viewModel.selectRoute(it) }
-                    )
+@Composable
+private fun ConfirmShippingDialog(
+    items: List<ScannedShippingItem>,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val baskets = items.map { it.basket }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.LocalShipping,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        },
+        title = { Text("確認出貨") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "共 ${baskets.size} 個籃子",
+                    style = MaterialTheme.typography.titleSmall
+                )
+
+                Divider()
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "將出貨的籃子：",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        baskets.take(5).forEach { basket ->
+                            Text(
+                                text = "• ${basket.uid.takeLast(8)} - ${basket.product?.name ?: "未配置"} (${getBasketStatusText(basket.status)})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (baskets.size > 5) {
+                            Text(
+                                text = "... 還有 ${baskets.size - 5} 個籃子",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
                 }
 
-                ShippingVerifyStep.SCANNING -> {
-                    VerifyScanningStep(
-                        route = uiState.selectedRoute!!,
-                        items = uiState.verifyItems,
-                        statistics = uiState.statistics,
-                        scanMode = uiState.scanMode,
-                        isScanning = scanState.isScanning,
-                        scanType = scanState.scanType,
-                        isValidating = uiState.isValidating,
-                        isSubmitted = uiState.hasSubmitted,
-                        canScan = uiState.canScan,
-                        scanDisabledReason = uiState.scanDisabledReason,
-                        onModeChange = { viewModel.setScanMode(it) },
-                        onToggleScan = { viewModel.toggleScanFromButton() },
-                        onRemoveItem = { viewModel.removeItem(it) },
-                        onBack = { viewModel.resetVerification() }
-                    )
-                }
+                Divider()
 
-                else -> {}
+                Text(
+                    text = "✅ 確認後這些籃子將標記為「已出貨」",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("確認出貨")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
             }
         }
-    }
+    )
 }
 
 // ==================== 步驟指示器 ====================

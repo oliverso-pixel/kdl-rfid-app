@@ -25,13 +25,6 @@ import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * 籃子驗證結果
- */
-//sealed class BasketValidationResult {
-//    data class Error(val message: String) : BasketValidationResult()
-//}
-
 @Singleton
 class BasketRepository @Inject constructor(
     private val apiService: ApiService,
@@ -110,12 +103,10 @@ class BasketRepository @Inject constructor(
             )
 
             if (isOnline) {
-                // Online: 呼叫 API
                 val response = apiService.bulkUpdateBaskets(request)
 
                 if (response.isSuccessful) {
                     Timber.d("✅ Bulk update ($updateType) success: ${items.size} items")
-                    // 更新本地 DB
                     updateLocalDatabase(updateType, commonData, items)
                     Result.success(Unit)
                 } else {
@@ -123,7 +114,6 @@ class BasketRepository @Inject constructor(
                     Result.failure(Exception("提交失敗: $errorMsg"))
                 }
             } else {
-                // Offline: 存入 PendingOperation
                 val payloadJson = Json.encodeToString(request)
                 val operation = PendingOperationEntity(
                     operationType = OperationType.valueOf(updateType.uppercase()), // 確保 Enum 存在
@@ -132,8 +122,6 @@ class BasketRepository @Inject constructor(
                     timestamp = System.currentTimeMillis()
                 )
                 pendingOperationDao.insertOperation(operation)
-
-                // 更新本地 DB
                 updateLocalDatabase(updateType, commonData, items)
 
                 Timber.d("📱 Offline bulk update ($updateType) saved")
@@ -163,7 +151,8 @@ class BasketRepository @Inject constructor(
             // 1. 決定 Status (Item > Common > Default)
             val targetStatusStr = item.status ?: common.status ?: when (updateType) {
                 "Production" -> "IN_PRODUCTION"
-                "Receiving", "Transfer" -> "IN_STOCK"
+                "Receiving", "Transfer", "Inventory" -> "IN_STOCK"
+                "Shipping" -> "SHIPPED"
                 "Clear" -> "UNASSIGNED"
                 else -> entity.status.name
             }
@@ -290,42 +279,6 @@ class BasketRepository @Inject constructor(
                 updateBy = null
             )
             basketDao.insertBasket(basket)
-        }
-    }
-
-    suspend fun deleteBasket(uid: String, isOnline: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            if (isOnline) {
-                val response = apiService.deleteBasket(uid)
-                if (response.success) {
-                    basketDao.deleteBasket(uid)
-                    Result.success(Unit)
-                } else {
-                    Result.failure(Exception(response.message ?: "刪除失敗"))
-                }
-            } else {
-                val operation = PendingOperationEntity(
-                    operationType = OperationType.ADMIN_UPDATE,
-                    uid = uid,
-                    payload = "",
-                    timestamp = System.currentTimeMillis()
-                )
-                pendingOperationDao.insertOperation(operation)
-                basketDao.deleteBasket(uid)
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun getAllBaskets(): Result<List<Basket>> = withContext(Dispatchers.IO) {
-        try {
-            val entities = basketDao.getAllBaskets().first()
-            val baskets = entities.map { it.toBasket() }
-            Result.success(baskets)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 

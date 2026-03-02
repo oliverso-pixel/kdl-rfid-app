@@ -103,24 +103,56 @@ fun InventoryScreen(
             }
         },
         floatingActionButton = {
-            // 完成/提交按鈕（僅掃描步驟顯示）
-            if (uiState.currentStep == InventoryStep.SCANNING &&
-                uiState.statistics.scannedItems > 0) {
-                ExtendedFloatingActionButton(
-                    text = {
-                        Text(
-                            when (uiState.inventoryMode) {
-                                InventoryMode.FULL -> "提交盤點"
-                                InventoryMode.BY_PRODUCT -> "完成此批次"
-                                else -> "完成"
-                            }
-                        )
-                    },
-                    icon = { Icon(Icons.Default.Check, contentDescription = null) },
-                    onClick = { viewModel.completeCurrent() },
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+            when {
+                // 有待確認的數量修改
+                uiState.pendingQuantityChanges.isNotEmpty() -> {
+                    ExtendedFloatingActionButton(
+                        text = {
+                            Text("確認數量修改 (${uiState.pendingQuantityChanges.size})")
+                        },
+                        icon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = { viewModel.showQuantityConfirmDialog() },
+                        containerColor = Color(0xFFFF9800) // 橙色
+                    )
+                }
+
+                // 完成/提交按鈕
+                uiState.currentStep == InventoryStep.SCANNING &&
+                        uiState.statistics.scannedItems > 0 -> {
+                    ExtendedFloatingActionButton(
+                        text = {
+                            Text(
+                                when (uiState.inventoryMode) {
+                                    InventoryMode.FULL -> "提交盤點"
+                                    InventoryMode.BY_PRODUCT -> "完成此批次"
+                                    else -> "完成"
+                                }
+                            )
+                        },
+                        icon = { Icon(Icons.Default.Check, contentDescription = null) },
+                        onClick = { viewModel.completeCurrent() },
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
+            // 完成/提交按鈕（僅掃描步驟顯示）
+//            if (uiState.currentStep == InventoryStep.SCANNING &&
+//                uiState.statistics.scannedItems > 0) {
+//                ExtendedFloatingActionButton(
+//                    text = {
+//                        Text(
+//                            when (uiState.inventoryMode) {
+//                                InventoryMode.FULL -> "提交盤點"
+//                                InventoryMode.BY_PRODUCT -> "完成此批次"
+//                                else -> "完成"
+//                            }
+//                        )
+//                    },
+//                    icon = { Icon(Icons.Default.Check, contentDescription = null) },
+//                    onClick = { viewModel.completeCurrent() },
+//                    containerColor = MaterialTheme.colorScheme.primary
+//                )
+//            }
         }
     ) { paddingValues ->
         Column(
@@ -202,6 +234,14 @@ fun InventoryScreen(
                 else -> {}
             }
         }
+    }
+
+    if (uiState.showQuantityConfirmDialog) {
+        QuantityChangesConfirmDialog(
+            summary = viewModel.getQuantityChangesSummary(),
+            onDismiss = { viewModel.dismissQuantityConfirmDialog() },
+            onConfirm = { viewModel.confirmQuantityChanges() }
+        )
     }
 
     if (uiState.showEditDialog && uiState.editingItem != null) {
@@ -1402,7 +1442,8 @@ private fun StatisticsOverviewCard(statistics: InventoryStatistics) {
 private fun InventoryItemCard(
     item: InventoryItem,
     onRemove: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    viewModel: InventoryViewModel = hiltViewModel()
 ) {
     BasketCard(
         basket = item.basket,
@@ -1410,9 +1451,256 @@ private fun InventoryItemCard(
         inventoryStatus = item.status,
         scanCount = item.scanCount,
         maxCapacity = item.basket.product?.maxBasketCapacity,
-        onQuantityChange = {},
+        onQuantityChange = { newQuantity ->
+            viewModel.recordQuantityChange(item.basket.uid, newQuantity)
+        },
         onRemove = onRemove,
         onEdit = onEdit,
         onTrack = {}
     )
+}
+
+@Composable
+private fun QuantityChangesConfirmDialog(
+    summary: QuantityChangesSummary,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = null,
+                tint = Color(0xFFFF9800),
+                modifier = Modifier.size(32.dp)
+            )
+        },
+        title = {
+            Text(
+                "確認數量修改",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    Text(
+                        "您修改了 ${summary.changedCount} 個籃子的數量，請確認：",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                // 匯總信息
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFFF9800).copy(alpha = 0.1f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "修改數量:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "${summary.changedCount} 個",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFF9800)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "原總數量:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "${summary.totalOldQuantity} 個",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "新總數量:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "${summary.totalNewQuantity} 個",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            HorizontalDivider()
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    "差異:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                val diff = summary.totalNewQuantity - summary.totalOldQuantity
+                                Text(
+                                    if (diff > 0) "+$diff 個" else "$diff 個",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (diff > 0) Color(0xFF4CAF50) else Color(0xFFF44336)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                // 詳細列表
+                item {
+                    Text(
+                        "修改明細:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                items(summary.items) { change ->
+                    QuantityChangeItemCard(change)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFFF9800)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "確認修改",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+private fun QuantityChangeItemCard(change: QuantityChangeItem) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = change.productName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "UID: ...${change.uid.takeLast(8)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 舊數量
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        text = "${change.oldQuantity}",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Default.ArrowForward,
+                    contentDescription = null,
+                    tint = Color(0xFFFF9800),
+                    modifier = Modifier.size(16.dp)
+                )
+
+                // 新數量
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFFFF9800).copy(alpha = 0.2f)
+                ) {
+                    Text(
+                        text = "${change.newQuantity}",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFFF9800)
+                    )
+                }
+            }
+        }
+    }
 }

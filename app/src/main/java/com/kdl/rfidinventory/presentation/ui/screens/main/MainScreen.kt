@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,7 +52,6 @@ fun MainScreen(
                         }
                     },
                     actions = {
-                        // 連接狀態指示器
                         WebSocketStatusIndicator(
                             webSocketState = webSocketState,
                             isOnline = isOnline,
@@ -62,7 +63,7 @@ fun MainScreen(
 
                         IconButton(onClick = { viewModel.showLogoutDialog() }) {
                             Icon(
-                                Icons.Default.Logout,
+                                Icons.AutoMirrored.Filled.Logout,
                                 contentDescription = "登出",
                                 tint = MaterialTheme.colorScheme.onPrimary
                             )
@@ -82,7 +83,7 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp)
+                .padding(horizontal = 16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -113,7 +114,7 @@ fun MainScreen(
                     MenuItem(
                         title = "倉庫盤點",
                         description = "查看和管理倉庫庫存",
-                        icon = Icons.Default.Assignment,
+                        icon = Icons.AutoMirrored.Filled.Assignment,
                         route = Screen.Inventory.route
                     ),
                     MenuItem(
@@ -169,7 +170,6 @@ fun MainScreen(
             SectionCard(
                 title = "其他功能",
                 items = listOf(
-
 //                    MenuItem(
 //                        title = "抽樣檢驗",
 //                        description = "標記籃子進行抽樣檢驗",
@@ -193,7 +193,7 @@ fun MainScreen(
             onDismissRequest = { viewModel.dismissLogoutDialog() },
             icon = {
                 Icon(
-                    imageVector = Icons.Default.Logout,
+                    imageVector = Icons.AutoMirrored.Filled.Logout,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -290,7 +290,7 @@ private fun WebSocketStatusIndicator(
                                 webSocketState is WebSocketState.Connected -> "已連接"
                                 webSocketState is WebSocketState.Connecting -> "連接中..."
                                 webSocketState is WebSocketState.Disconnected ->
-                                    "已斷開: ${webSocketState.reason ?: "未知原因"}"
+                                    "已斷開: ${webSocketState.reason}"
                                 webSocketState is WebSocketState.Error ->
                                     "錯誤: ${webSocketState.error}"
                                 else -> "未知狀態"
@@ -309,7 +309,7 @@ private fun WebSocketStatusIndicator(
                 onClick = { }
             )
 
-            Divider()
+//            Divider()
 
             // 重新連接（只在啟用且未連接時顯示）
             if (webSocketEnabled && !isOnline) {

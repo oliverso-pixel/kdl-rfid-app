@@ -24,6 +24,7 @@ import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
 import com.kdl.rfidinventory.util.NetworkState
 import com.kdl.rfidinventory.util.ScanMode
 import com.kdl.rfidinventory.util.ScanModeAvailability
+import timber.log.Timber
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,15 +39,33 @@ fun BasketManagementScreen(
     val mode by viewModel.basketManagementMode.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
     val scanMode by viewModel.scanMode.collectAsStateWithLifecycle()
+    val scannedUids = uiState.scannedUids
 
-    val scannedUids by viewModel.scannedUids.collectAsStateWithLifecycle()
+    LaunchedEffect(scannedUids.size) {
+//        android.util.Log.d("BasketManagement", "📊 Scanned UIDs count: ${scannedUids.size}")
+        Timber.tag("BasketManagement").d("📊 Scanned UIDs count: ${scannedUids.size}")
+    }
+
+    LaunchedEffect(Unit) {
+//        android.util.Log.d("BasketManagement", "🎬 BasketManagementScreen composition started")
+        Timber.tag("BasketManagement").d("🎬 BasketManagementScreen composition started")
+    }
+
+    DisposableEffect(Unit) {
+//        android.util.Log.d("BasketManagement", "🎬 Screen attached")
+        Timber.tag("BasketManagement").d("🎬 Screen attached")
+        onDispose {
+//            android.util.Log.d("BasketManagement", "🎬 Screen detached")
+            Timber.tag("BasketManagement").d("🎬 Screen detached")
+        }
+    }
+
     val queriedBasket by viewModel.queriedBasket.collectAsStateWithLifecycle()
     val localBaskets by viewModel.baskets.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showConfirmDialog by remember { mutableStateOf(false) }
 
-    // 錯誤提示
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
             snackbarHostState.showSnackbar(
@@ -111,7 +130,6 @@ fun BasketManagementScreen(
             }
         },
         floatingActionButton = {
-            // 僅在登記模式且有資料時顯示
             if (mode == BasketManagementMode.REGISTER && scannedUids.isNotEmpty()) {
                 ExtendedFloatingActionButton(
                     text = { Text("提交 (${scannedUids.size})") },
@@ -193,7 +211,7 @@ fun BasketManagementScreen(
                         }
 
                         items(
-                            items = scannedUids.toList(),
+                            items = scannedUids,  // ✅ 直接使用，無需 toList()
                             key = { it }
                         ) { uid ->
                             Card {

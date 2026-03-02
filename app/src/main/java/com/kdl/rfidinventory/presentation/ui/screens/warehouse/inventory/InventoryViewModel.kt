@@ -99,8 +99,8 @@ class InventoryViewModel @Inject constructor(
     private val scanManager: ScanManager,
     private val warehouseRepository: WarehouseRepository,
     private val basketRepository: BasketRepository,
-    private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao,
+    webSocketManager: WebSocketManager,
+    pendingOperationDao: PendingOperationDao,
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
@@ -183,7 +183,7 @@ class InventoryViewModel @Inject constructor(
                 val warehouse = _uiState.value.selectedWarehouse!!
                 val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
-                // ✅ 驗證籃子類型
+                // 驗證籃子類型
                 if (item.basket.type != null && item.basket.type != product.btype) {
                     _uiState.update {
                         it.copy(
@@ -196,7 +196,7 @@ class InventoryViewModel @Inject constructor(
                     return@launch
                 }
 
-                // ✅ 準備更新數據（與 Production 相同格式）
+                // 準備更新數據（與 Production 相同格式）
                 val simplifiedBatch = mapOf(
                     "batch_code" to batch.batch_code,
                     "itemcode" to batch.itemcode,
@@ -275,7 +275,7 @@ class InventoryViewModel @Inject constructor(
                             selectedProductForEdit = null,
                             selectedBatchForEdit = null,
                             availableBatches = emptyList(),
-                            successMessage = "✅ 籃子信息已更新"
+                            successMessage = " 籃子信息已更新"
                         )
                     }
 
@@ -288,7 +288,7 @@ class InventoryViewModel @Inject constructor(
                         }
                     }
 
-                    Timber.d("✅ Extra item updated: ${item.basket.uid}")
+                    Timber.d(" Extra item updated: ${item.basket.uid}")
                     Timber.d("   Product: ${product.name}")
                     Timber.d("   Batch: ${batch.batch_code}")
                     Timber.d("   Quantity: $quantity")
@@ -882,6 +882,107 @@ class InventoryViewModel @Inject constructor(
     }
 
     /**
+     * 記錄數量變更（待確認）
+     */
+    fun recordQuantityChange(uid: String, newQuantity: Int) {
+        _uiState.update { state ->
+            val currentChanges = state.pendingQuantityChanges.toMutableMap()
+            currentChanges[uid] = newQuantity
+
+            state.copy(
+                pendingQuantityChanges = currentChanges
+            )
+        }
+
+        Timber.d("📝 Recorded quantity change: $uid -> $newQuantity")
+    }
+
+    /**
+     * 顯示數量確認對話框
+     */
+    fun showQuantityConfirmDialog() {
+        if (_uiState.value.pendingQuantityChanges.isEmpty()) {
+            _uiState.update { it.copy(error = "沒有待確認的數量修改") }
+            return
+        }
+
+        _uiState.update { it.copy(showQuantityConfirmDialog = true) }
+    }
+
+    /**
+     * 取消數量修改
+     */
+    fun dismissQuantityConfirmDialog() {
+        _uiState.update {
+            it.copy(
+                showQuantityConfirmDialog = false,
+                pendingQuantityChanges = emptyMap()
+            )
+        }
+    }
+
+    /**
+     * 確認數量修改
+     */
+    fun confirmQuantityChanges() {
+        val changes = _uiState.value.pendingQuantityChanges
+
+        if (changes.isEmpty()) {
+            _uiState.update { it.copy(showQuantityConfirmDialog = false) }
+            return
+        }
+
+        _uiState.update { state ->
+            // 更新 inventoryItems 中的數量
+            val updatedItems = state.inventoryItems.map { item ->
+                val newQuantity = changes[item.basket.uid]
+                if (newQuantity != null) {
+                    item.copy(
+                        basket = item.basket.copy(quantity = newQuantity)
+                    )
+                } else {
+                    item
+                }
+            }
+
+            state.copy(
+                inventoryItems = updatedItems,
+                showQuantityConfirmDialog = false,
+                pendingQuantityChanges = emptyMap(),
+                successMessage = "✅ 已確認 ${changes.size} 個籃子的數量修改"
+            )
+        }
+
+        Timber.d("✅ Confirmed ${changes.size} quantity changes")
+    }
+
+    /**
+     * 獲取修改統計
+     */
+    fun getQuantityChangesSummary(): QuantityChangesSummary {
+        val changes = _uiState.value.pendingQuantityChanges
+        val items = _uiState.value.inventoryItems
+
+        val changedItems = items.filter { changes.containsKey(it.basket.uid) }
+        val totalOldQuantity = changedItems.sumOf { it.basket.quantity }
+        val totalNewQuantity = changedItems.sumOf { changes[it.basket.uid] ?: 0 }
+
+        return QuantityChangesSummary(
+            changedCount = changes.size,
+            totalOldQuantity = totalOldQuantity,
+            totalNewQuantity = totalNewQuantity,
+            items = changedItems.map { item ->
+                QuantityChangeItem(
+                    uid = item.basket.uid,
+                    productName = item.basket.product?.name ?: "未配置",
+                    oldQuantity = item.basket.quantity,
+                    newQuantity = changes[item.basket.uid] ?: item.basket.quantity
+                )
+            }
+        )
+    }
+
+    /**
      * 只增加掃描計數，不改變狀態
      */
     private fun incrementScanCount(uid: String) {
@@ -1274,19 +1375,110 @@ class InventoryViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true) }
 
-            // TODO: 實現提交邏輯
-            delay(1000)
+            try {
+                val warehouse = _uiState.value.selectedWarehouse!!
+                val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
+                val online = isOnline.value
 
-            _uiState.update {
-                it.copy(
-                    isSubmitting = false,
-                    successMessage = "✅ 盤點數據已提交"
-                )
+                // 更新所有已掃描籃子的數量
+                val scannedItems = _uiState.value.inventoryItems.filter {
+                    it.status == InventoryItemStatus.SCANNED || it.status == InventoryItemStatus.EXTRA
+                }
+
+                if (scannedItems.isNotEmpty()) {
+                    val commonData = CommonDataDto(
+                        updateBy = currentUser,
+                        status = "IN_STOCK"
+                    )
+
+                    val updateItems = scannedItems.map { item ->
+                        BasketUpdateItemDto(
+                            rfid = item.basket.uid,
+                            quantity = item.basket.quantity
+                        )
+                    }
+
+                    basketRepository.updateBasket(
+                        updateType = "Inventory",
+                        commonData = commonData,
+                        items = updateItems,
+                        isOnline = online
+                    ).onSuccess {
+                        Timber.d("✅ Updated ${updateItems.size} baskets")
+                    }.onFailure { error ->
+                        throw error
+                    }
+                }
+
+                val inventoryData = collectFullInventoryData()
+
+                Timber.d("📦 ========== 提交全部盤點數據 ==========")
+                Timber.d("倉庫: ${warehouse.name}")
+                Timber.d("總籃子數: ${inventoryData.totalBaskets}")
+                Timber.d("已掃描: ${inventoryData.scannedCount}")
+                Timber.d("額外項: ${inventoryData.extraCount}")
+
+                // TODO: 實現真實的 API 調用
+                // val response = apiService.submitInventory(inventoryData)
+                // if (!response.success) {
+                //     throw Exception(response.message ?: "提交失敗")
+                // }
+
+                // 模擬網絡請求
+                delay(1500)
+
+                _uiState.update {
+                    it.copy(
+                        isSubmitting = false,
+                        successMessage = "✅ 盤點數據已成功提交"
+                    )
+                }
+
+                delay(1000)
+                resetInventory()
+
+            } catch (e: Exception) {
+                Timber.e(e, "提交盤點數據失敗")
+                _uiState.update {
+                    it.copy(
+                        isSubmitting = false,
+                        error = "提交失敗: ${e.message}"
+                    )
+                }
             }
-
-            // 重置狀態
-            resetInventory()
         }
+    }
+
+    /**
+     * 收集全部盤點數據
+     */
+    private fun collectFullInventoryData(): FullInventorySubmitData {
+        val warehouse = _uiState.value.selectedWarehouse!!
+        val items = _uiState.value.inventoryItems
+
+        return FullInventorySubmitData(
+            warehouseId = warehouse.id,
+            warehouseName = warehouse.name,
+            totalBaskets = items.size,
+            scannedCount = items.count { it.status == InventoryItemStatus.SCANNED },
+            extraCount = items.count { it.status == InventoryItemStatus.EXTRA },
+            pendingCount = items.count { it.status == InventoryItemStatus.PENDING },
+            baskets = items.map { item ->
+                BasketInventoryInfo(
+                    uid = item.basket.uid,
+                    productId = item.basket.product?.itemcode,
+                    productName = item.basket.product?.name,
+                    batchId = item.basket.batch?.batch_code,
+                    quantity = item.basket.quantity,
+                    status = when (item.status) {
+                        InventoryItemStatus.SCANNED -> "SCANNED"
+                        InventoryItemStatus.EXTRA -> "EXTRA"
+                        InventoryItemStatus.PENDING -> "PENDING"
+                    }
+                )
+            },
+            timestamp = System.currentTimeMillis()
+        )
     }
 
     /**
@@ -1304,11 +1496,63 @@ class InventoryViewModel @Inject constructor(
             _uiState.update { it.copy(isSubmitting = true) }
 
             try {
+                val warehouse = _uiState.value.selectedWarehouse!!
+                val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
+                val online = isOnline.value
+
+                // 收集所有產品的已掃描籃子
+                val allScannedItems = mutableListOf<InventoryItem>()
+
+                _uiState.value.productGroups.forEach { group ->
+                    group.batches.filter { it.isScanned }.forEach { batchGroup ->
+                        // 這裡需要從 allWarehouseBaskets 中找到對應的籃子
+                        val batchBaskets = allWarehouseBaskets.filter {
+                            it.product?.itemcode == group.product.itemcode &&
+                                    it.batch?.batch_code == batchGroup.batch.batch_code
+                        }
+
+                        allScannedItems.addAll(
+                            batchBaskets.map { basket ->
+                                InventoryItem(
+                                    basket = basket,
+                                    status = InventoryItemStatus.SCANNED
+                                )
+                            }
+                        )
+                    }
+                }
+
+                // 更新所有已掃描籃子的數量
+                if (allScannedItems.isNotEmpty()) {
+                    val commonData = CommonDataDto(
+                        updateBy = currentUser,
+                        status = "IN_STOCK"
+                    )
+
+                    val updateItems = allScannedItems.map { item ->
+                        BasketUpdateItemDto(
+                            rfid = item.basket.uid,
+                            quantity = item.basket.quantity
+                        )
+                    }
+
+                    basketRepository.updateBasket(
+                        updateType = "Inventory",
+                        commonData = commonData,
+                        items = updateItems,
+                        isOnline = online
+                    ).onSuccess {
+                        Timber.d("✅ Updated ${updateItems.size} baskets")
+                    }.onFailure { error ->
+                        throw error
+                    }
+                }
+
                 // 收集盤點數據
                 val inventoryData = collectInventoryData()
 
-                Timber.d("📦 ========== 提交盤點數據 ==========")
-                Timber.d("倉庫: ${_uiState.value.selectedWarehouse?.name}")
+                Timber.d("📦 ========== 提交按貨盤點數據 ==========")
+                Timber.d("倉庫: ${warehouse.name}")
                 Timber.d("產品數: ${inventoryData.productSummaries.size}")
                 Timber.d("總籃子數: ${inventoryData.totalBaskets}")
                 Timber.d("總數量: ${inventoryData.totalQuantity}")
@@ -1320,7 +1564,7 @@ class InventoryViewModel @Inject constructor(
                 // }
 
                 // 模擬網絡請求
-                kotlinx.coroutines.delay(1500)
+                delay(1500)
 
                 _uiState.update {
                     it.copy(
@@ -1330,7 +1574,7 @@ class InventoryViewModel @Inject constructor(
                 }
 
                 // 延遲後重置狀態
-                kotlinx.coroutines.delay(1000)
+                delay(1000)
                 resetInventory()
 
             } catch (e: Exception) {
@@ -1485,6 +1729,9 @@ data class InventoryUiState(
     val selectedBatchForEdit: Batch? = null,
     val availableBatches: List<Batch> = emptyList(),
 
+    val showQuantityConfirmDialog: Boolean = false,
+    val pendingQuantityChanges: Map<String, Int> = emptyMap(),
+
     // 消息
     val error: String? = null,
     val successMessage: String? = null
@@ -1498,6 +1745,45 @@ data class InventoryStatistics(
 )
 
 // ==================== 提交數據模型 ====================
+data class QuantityChangesSummary(
+    val changedCount: Int,
+    val totalOldQuantity: Int,
+    val totalNewQuantity: Int,
+    val items: List<QuantityChangeItem>
+)
+
+data class QuantityChangeItem(
+    val uid: String,
+    val productName: String,
+    val oldQuantity: Int,
+    val newQuantity: Int
+)
+
+/**
+ * 全部盤點提交數據
+ */
+data class FullInventorySubmitData(
+    val warehouseId: String,
+    val warehouseName: String,
+    val totalBaskets: Int,
+    val scannedCount: Int,
+    val extraCount: Int,
+    val pendingCount: Int,
+    val baskets: List<BasketInventoryInfo>,
+    val timestamp: Long
+)
+
+/**
+ * 籃子盤點信息
+ */
+data class BasketInventoryInfo(
+    val uid: String,
+    val productId: String?,
+    val productName: String?,
+    val batchId: String?,
+    val quantity: Int,
+    val status: String  // SCANNED, EXTRA, PENDING
+)
 
 /**
  * 盤點提交數據

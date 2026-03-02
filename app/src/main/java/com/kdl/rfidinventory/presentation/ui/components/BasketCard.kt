@@ -33,6 +33,7 @@ enum class BasketCardMode {
     PRODUCTION,   // 生產模式：顯示掃描次數、RSSI、時間
     RECEIVING,    // 收貨模式：顯示狀態驗證、錯誤提示
     INVENTORY,     // 盤點模式：顯示 EXTRA/SCANNED 狀態、編輯/追蹤按鈕
+    SHIPPING,
     CLEAR
 }
 
@@ -94,6 +95,7 @@ fun BasketCard(
         BasketCardMode.PRODUCTION -> true
         BasketCardMode.RECEIVING -> isValidStatus
         BasketCardMode.INVENTORY -> inventoryStatus != InventoryItemStatus.EXTRA
+        BasketCardMode.SHIPPING -> true
         BasketCardMode.CLEAR -> false
     }
 
@@ -102,6 +104,7 @@ fun BasketCard(
         BasketCardMode.PRODUCTION -> true
         BasketCardMode.RECEIVING -> true
         BasketCardMode.INVENTORY -> inventoryStatus != InventoryItemStatus.EXTRA
+        BasketCardMode.SHIPPING -> true
         BasketCardMode.CLEAR -> true
     }
 
@@ -137,6 +140,17 @@ fun BasketCard(
                 )
             }
         }
+        BasketCardMode.SHIPPING -> {
+            if (!isValidStatus) {
+                CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                )
+            } else {
+                CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            }
+        }
         BasketCardMode.CLEAR -> CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     }
 
@@ -151,6 +165,12 @@ fun BasketCard(
                 InventoryItemStatus.EXTRA -> Color(0xFFFF9800)
                 else -> Color.Transparent
             }
+        }
+        BasketCardMode.SHIPPING -> {
+            if (!isValidStatus) MaterialTheme.colorScheme.error else Color.Transparent
+        }
+        BasketCardMode.CLEAR -> {
+            if (!isValidStatus) MaterialTheme.colorScheme.error else Color.Transparent
         }
         else -> Color.Transparent
     }
@@ -176,6 +196,16 @@ fun BasketCard(
             // 收貨模式：狀態錯誤橫幅
             if (mode == BasketCardMode.RECEIVING && !isValidStatus) {
                 StatusErrorBanner(status = basket.status)
+            }
+
+            // 出貨模式：狀態錯誤橫幅
+            if (mode == BasketCardMode.SHIPPING && !isValidStatus) {
+                ShippingErrorBanner(status = basket.status)
+            }
+
+            // 清除模式：狀態錯誤橫幅
+            if (mode == BasketCardMode.CLEAR && !isValidStatus) {
+                ClearErrorBanner(status = basket.status)
             }
 
             // 生產模式：重複掃描提示
@@ -284,6 +314,80 @@ fun BasketCard(
     }
 }
 // ========== 橫幅組件 ==========
+
+// 添加出貨模式錯誤橫幅
+@Composable
+private fun ShippingErrorBanner(status: BasketStatus) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "無法出貨",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = "只能出貨「在庫」或「未配置」狀態的籃子\n當前狀態：${getBasketStatusText(status)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+    }
+}
+
+// 添加清除模式錯誤橫幅
+@Composable
+private fun ClearErrorBanner(status: BasketStatus) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "無法清除",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = "只能清除「已配置」狀態的籃子\n當前狀態：${getBasketStatusText(status)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun StatusErrorBanner(status: BasketStatus) {

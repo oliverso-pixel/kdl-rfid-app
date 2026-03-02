@@ -40,7 +40,6 @@ class ProductionViewModel @Inject constructor(
 
     val isOnline: StateFlow<Boolean> = webSocketManager.isOnline
 
-    // 綜合網絡狀態（結合 isOnline 和待同步數量）
     val networkState: StateFlow<NetworkState> = combine(
         isOnline,
         pendingOperationDao.getPendingCount()
@@ -115,7 +114,6 @@ class ProductionViewModel @Inject constructor(
                     is ScanResult.BarcodeScanned -> {
                         when (result.context) {
                             ScanContext.PRODUCT_SEARCH -> {
-                                // 產品搜索
                                 updateProductSearchQuery(result.barcode)
                             }
 //                            ScanContext.BASKET_SCAN -> {
