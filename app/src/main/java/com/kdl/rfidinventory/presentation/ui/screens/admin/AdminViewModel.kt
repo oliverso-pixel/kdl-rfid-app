@@ -17,7 +17,7 @@ import com.kdl.rfidinventory.data.repository.AdminRepository
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.util.*
-import com.kdl.rfidinventory.util.rfid.RFIDManager
+import com.kdl.rfidinventory.domain.manager.rfid.RFIDManager
 import com.ubx.usdk.bean.RfidParameter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay

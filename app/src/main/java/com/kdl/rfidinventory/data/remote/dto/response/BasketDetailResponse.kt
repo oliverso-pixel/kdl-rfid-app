@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 data class BasketDetailResponse(
     @SerializedName("rfid")
     val rfid: String,
+    val tag_code: String? = null,
     val type: Int,
     val description: String?,
     val bid: Int?,

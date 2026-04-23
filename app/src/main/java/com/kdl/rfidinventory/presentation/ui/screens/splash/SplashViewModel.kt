@@ -2,7 +2,7 @@ package com.kdl.rfidinventory.presentation.ui.screens.splash
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.kdl.rfidinventory.util.rfid.RFIDManager
+import com.kdl.rfidinventory.domain.manager.rfid.RFIDManager
 //import com.kdl.rfidinventory.domain.manager.RFIDManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay

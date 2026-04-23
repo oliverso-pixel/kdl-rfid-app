@@ -12,7 +12,7 @@ import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.ProductionRepository
-import com.kdl.rfidinventory.util.rfid.RFIDTag
+import com.kdl.rfidinventory.domain.manager.rfid.RFIDTag
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -380,6 +380,7 @@ class ProductionViewModel @Inject constructor(
 
         val newBasket = ScannedBasket(
             uid = uid,
+            tagCode = basket.tagCode,
             quantity = product.maxBasketCapacity,
             rssi = rssi,
             scanCount = 1,
@@ -392,7 +393,7 @@ class ProductionViewModel @Inject constructor(
                 scannedBaskets = state.scannedBaskets + newBasket,
                 totalScanCount = state.totalScanCount + 1,
                 isValidating = false,
-                successMessage = "✅ 籃子 ${uid.takeLast(8)} 已添加"
+//                successMessage = " 籃子 ${uid.takeLast(8)} 已添加"
             )
         }
 

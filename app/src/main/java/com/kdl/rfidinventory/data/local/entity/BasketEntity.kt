@@ -17,6 +17,7 @@ import com.kdl.rfidinventory.data.model.BasketStatus
 data class BasketEntity(
     @PrimaryKey
     val uid: String,
+    val tagCode: String?,
     val type: Int? = null,
 
     // ========== 扁平字段（用於查詢和索引）==========

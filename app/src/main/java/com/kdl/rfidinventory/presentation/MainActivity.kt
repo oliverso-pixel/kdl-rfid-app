@@ -4,11 +4,9 @@ import android.annotation.SuppressLint
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RequiresApi
@@ -27,7 +25,7 @@ import com.kdl.rfidinventory.presentation.ui.screens.splash.SplashScreen
 import com.kdl.rfidinventory.presentation.ui.theme.RFIDInventoryTheme
 import com.kdl.rfidinventory.util.KeyEventHandler
 import com.kdl.rfidinventory.util.ScreenBrightnessManager
-import com.kdl.rfidinventory.util.barcode.BarcodeScanManager
+import com.kdl.rfidinventory.domain.manager.barcode.BarcodeScanManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch

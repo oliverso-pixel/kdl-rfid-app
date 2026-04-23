@@ -227,7 +227,7 @@ class ClearViewModel @Inject constructor(
             state.copy(
                 scannedBaskets = state.scannedBaskets + item,
                 isValidating = false,
-                successMessage = "✅ 籃子 ${basket.uid.takeLast(8)} 已添加"
+                successMessage = "籃子 ${basket.tagCode?.takeLast(6)} 已添加"
             )
         }
 

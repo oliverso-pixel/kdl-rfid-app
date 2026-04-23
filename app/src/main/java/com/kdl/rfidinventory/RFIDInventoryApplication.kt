@@ -2,7 +2,7 @@ package com.kdl.rfidinventory
 
 import android.app.Application
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
-import com.kdl.rfidinventory.util.rfid.RFIDManager
+import com.kdl.rfidinventory.domain.manager.rfid.RFIDManager
 import dagger.hilt.android.HiltAndroidApp
 import jakarta.inject.Inject
 import timber.log.Timber

@@ -270,6 +270,7 @@ class BasketRepository @Inject constructor(
         if (basketDao.getBasketByUid(uid) == null) {
             val basket = BasketEntity(
                 uid = uid,
+                tagCode = null,
                 productId = null, productName = null, batchId = null, warehouseId = null,
                 productJson = null, batchJson = null,
                 quantity = 0,

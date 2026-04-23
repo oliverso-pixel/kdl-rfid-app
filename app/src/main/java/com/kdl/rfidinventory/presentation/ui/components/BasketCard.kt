@@ -220,7 +220,7 @@ fun BasketCard(
 
             // 標題行：UID、徽章和操作按鈕
             BasketHeaderRow(
-                uid = basket.uid,
+                uid = basket.tagCode ?: basket.uid,
                 mode = mode,
                 scanCount = when (mode) {
                     BasketCardMode.PRODUCTION -> scannedBasket?.scanCount

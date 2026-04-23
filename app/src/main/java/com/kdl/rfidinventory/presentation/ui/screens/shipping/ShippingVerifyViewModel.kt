@@ -447,7 +447,7 @@ class ShippingVerifyViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 scannedBaskets = state.scannedBaskets + item,
-                successMessage = " 籃子 ${basket.uid.takeLast(8)} 已添加"
+                successMessage = " 籃子 ${basket.tagCode?.takeLast(6)} 已添加"
             )
         }
 

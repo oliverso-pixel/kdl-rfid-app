@@ -53,6 +53,7 @@ fun ProductionBatchResponse.toBatch(): Batch {
 fun Basket.toEntity(): BasketEntity {
     return BasketEntity(
         uid = uid,
+        tagCode = tagCode,
         type = type,
         productId = product?.itemcode,
         productName = product?.name,
@@ -129,6 +130,7 @@ fun BasketDetailResponse.toBasket(): Basket {
 
     return Basket(
         uid = rfid,
+        tagCode = tag_code,
         type = type,
         product = parsedProduct,
         batch = parsedBatch,
@@ -199,6 +201,7 @@ fun BasketEntity.toBasket(): Basket {
 
     return Basket(
         uid = uid,
+        tagCode = tagCode,
         type = type,
         product = product,
         batch = batch,

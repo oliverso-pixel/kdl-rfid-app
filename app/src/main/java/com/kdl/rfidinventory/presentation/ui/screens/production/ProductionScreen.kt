@@ -197,6 +197,7 @@ fun ProductionScreen(
                         BasketCard(
                             basket = Basket(
                                 uid = scannedBasket.uid,
+                                tagCode = scannedBasket.tagCode,
                                 product = uiState.selectedProduct,
                                 batch = uiState.selectedBatch,
                                 warehouseId = null,

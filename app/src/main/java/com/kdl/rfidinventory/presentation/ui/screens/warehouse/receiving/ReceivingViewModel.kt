@@ -337,7 +337,7 @@ class ReceivingViewModel @Inject constructor(
                 scannedBaskets = state.scannedBaskets + item,
                 totalQuantity = state.totalQuantity + basket.quantity,
                 isValidating = false,
-                successMessage = "✅ 籃子 ${basket.uid.takeLast(8)} 已添加"
+                successMessage = " 籃子 ${basket.tagCode?.takeLast(6)} 已添加"
             )
         }
 

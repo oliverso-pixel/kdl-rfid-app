@@ -282,7 +282,7 @@ fun EditExtraItemDialog(
         },
         modifier = Modifier
             .fillMaxWidth(0.95f)
-            .fillMaxHeight(0.9f) // ✅ 限制最大高度
+            .fillMaxHeight(0.9f)
     ) {
         Surface(
             shape = RoundedCornerShape(24.dp),
@@ -292,7 +292,7 @@ fun EditExtraItemDialog(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-                // ✅ 固定標題區（不滾動）
+                // 固定標題區（不滾動）
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -316,7 +316,7 @@ fun EditExtraItemDialog(
 
                 HorizontalDivider()
 
-                // ✅ 可滾動的內容區
+                // 可滾動的內容區
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
@@ -355,7 +355,8 @@ fun EditExtraItemDialog(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = item.basket.uid,
+//                                            text = item.basket.uid,
+                                            text = item.basket.tagCode ?: item.basket.uid,
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -380,7 +381,8 @@ fun EditExtraItemDialog(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                             Text(
-                                                text = "類型 $type",
+//                                                text = "類型 $type",
+                                                text = if (type == 1) "類型 樽格" else "類型 花格",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Bold
                                             )

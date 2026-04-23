@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 data class Basket (
     val uid: String,
+    val tagCode: String? = null,
     val type: Int? = null,
     val product: Product?,
     val batch: Batch?,
