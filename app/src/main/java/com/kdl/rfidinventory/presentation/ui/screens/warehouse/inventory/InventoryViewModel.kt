@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import timber.log.Timber
+import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -32,76 +33,15 @@ import javax.inject.Inject
 import kotlin.collections.filter
 import kotlin.collections.first
 
-/**
- * 盤點模式
- */
-enum class InventoryMode {
-    FULL,           // 全部盤點
-    BY_PRODUCT      // 按貨盤點
-}
-
-/**
- * 盤點步驟
- */
-enum class InventoryStep {
-    SELECT_WAREHOUSE,       // 步驟 1: 選擇倉庫
-    SELECT_MODE,           // 步驟 2: 選擇盤點模式
-    SELECT_PRODUCT,        // 步驟 3: 選擇產品（僅按貨盤點）
-    SELECT_BATCH,          // 步驟 4: 選擇批次（僅按貨盤點）
-    SCANNING,              // 步驟 5: 掃描盤點
-    SUBMIT                 // 步驟 6: 提交數據
-}
-
-/**
- * 盤點項狀態
- */
-enum class InventoryItemStatus {
-    PENDING,        // 待盤點（灰色）
-    SCANNED,        // 已盤點（綠色）
-    EXTRA           // 額外項（橙色 - 不在列表但實際存在）
-}
-
-/**
- * 盤點項
- */
-data class InventoryItem(
-    val id: String = UUID.randomUUID().toString(),
-    val basket: Basket,
-    val status: InventoryItemStatus,
-    val scanCount: Int = 0  // 掃描次數（用於追蹤重複掃描）
-)
-
-/**
- * 批次分組
- */
-data class BatchGroup(
-    val batch: Batch,
-    val baskets: List<Basket>,
-    val totalQuantity: Int,
-    val expiryDate: String?,
-    val isScanned: Boolean = false  // 是否完成盤點
-)
-
-/**
- * 產品分組（含批次）
- */
-data class ProductGroup(
-    val product: Product,
-    val batches: List<BatchGroup>,
-    val totalBaskets: Int,
-    val totalQuantity: Int,
-    val isCompleted: Boolean = false  // 是否完成所有批次盤點
-)
-
 @RequiresApi(Build.VERSION_CODES.O)
 @HiltViewModel
 class InventoryViewModel @Inject constructor(
     private val scanManager: ScanManager,
-    private val warehouseRepository: WarehouseRepository,
-    private val basketRepository: BasketRepository,
     webSocketManager: WebSocketManager,
     pendingOperationDao: PendingOperationDao,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val warehouseRepository: WarehouseRepository,
+    private val basketRepository: BasketRepository
 ) : ViewModel() {
 
     val _uiState = MutableStateFlow(InventoryUiState())
@@ -123,8 +63,14 @@ class InventoryViewModel @Inject constructor(
 
     val scanState = scanManager.scanState
 
-    private var allWarehouseBaskets: List<Basket> = emptyList()
     private val validatingUids = mutableSetOf<String>()
+    private var allWarehouseBaskets: List<Basket> = emptyList()
+    private var inventoryStartTime: Instant? = null
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private val isoFormatter: DateTimeFormatter = DateTimeFormatter
+        .ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+        .withZone(java.time.ZoneOffset.UTC)
 
     init {
         Timber.d("📦 InventoryViewModel initialized")
@@ -132,6 +78,119 @@ class InventoryViewModel @Inject constructor(
         initializeScanManager()
         observeScanResults()
         observeScanErrors()
+        observeNetworkState()
+        scanManager.setBarcodeKeepWarm(true)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun initializeScanManager() {
+        scanManager.initialize(
+            scope = viewModelScope,
+            scanMode = _uiState.map { it.scanMode }.stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                ScanMode.SINGLE
+            ),
+            canStartScan = {
+                val state = _uiState.value
+                state.currentStep == InventoryStep.SELECT_WAREHOUSE || state.currentStep == InventoryStep.SCANNING || state.showProductDialog
+            },
+            scanContextProvider = {
+                val state = _uiState.value
+                when {
+                    state.showProductDialog -> ScanContext.PRODUCT_SEARCH
+                    state.currentStep == InventoryStep.SELECT_WAREHOUSE -> ScanContext.WAREHOUSE_SEARCH
+                    else -> ScanContext.BASKET_SCAN
+                }
+            }
+        )
+    }
+
+    private fun observeScanResults() {
+        viewModelScope.launch {
+            scanManager.scanResults.collect { result ->
+                when (result) {
+                    is ScanResult.BarcodeScanned -> {
+
+                        val resultContext = result.context
+                        Timber.d("resultContext : $resultContext")
+
+                        when (result.context) {
+                            ScanContext.WAREHOUSE_SEARCH -> {
+                                handleWarehouseSelection(result.barcode)
+                            }
+                            ScanContext.PRODUCT_SEARCH -> {
+                                updateProductSearchQuery(result.barcode)
+                            }
+//                            ScanContext.BASKET_SCAN -> {
+//                                processScannedBasket(result.barcode)
+//                            }
+                            else -> processScannedBasket(result.barcode)
+                        }
+                    }
+                    is ScanResult.RfidScanned -> handleScannedRfidTag(result.tag.uid)
+                    is ScanResult.ClearListRequested -> {}
+                }
+            }
+        }
+    }
+
+    private fun observeScanErrors() {
+        viewModelScope.launch {
+            scanManager.errors.collect { error ->
+                _uiState.update { it.copy(error = error) }
+            }
+        }
+    }
+
+    private fun observeNetworkState() {
+        viewModelScope.launch {
+            networkState.collect { state ->
+                Timber.d("📡 Inventory - Network state: $state")
+            }
+        }
+    }
+
+    fun setScanMode(mode: ScanMode) {
+        viewModelScope.launch {
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            }
+            scanManager.changeScanMode(mode)
+            _uiState.update { it.copy(scanMode = mode) }
+
+            val state = _uiState.value
+            val shouldKeepWarm = state.currentStep == InventoryStep.SELECT_WAREHOUSE ||
+                    state.showProductDialog ||
+                    (state.currentStep == InventoryStep.SCANNING && mode == ScanMode.SINGLE)
+            scanManager.setBarcodeKeepWarm(shouldKeepWarm)
+            Timber.d("🔀 Scan mode changed → $mode, keepBarcodeWarm=$shouldKeepWarm")
+        }
+    }
+
+    private fun handleScannedBarcode(barcode: String) {
+        Timber.d("🔍 Processing barcode: $barcode")
+        processScannedBasket(barcode)
+    }
+
+    private fun handleScannedRfidTag(uid: String) {
+        Timber.d("🔍 Processing RFID tag: $uid")
+        processScannedBasket(uid)
+    }
+
+    fun toggleScanFromButton() {
+        if (_uiState.value.currentStep != InventoryStep.SCANNING) {
+            _uiState.update { it.copy(error = "請先選擇盤點項目") }
+            return
+        }
+
+        viewModelScope.launch {
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_uiState.value.scanMode)
+            }
+        }
     }
 
     // ==================== 額外項編輯功能 ====================
@@ -327,10 +386,6 @@ class InventoryViewModel @Inject constructor(
                             isLoadingWarehouses = false
                         )
                     }
-
-                    if (_uiState.value.currentStep == InventoryStep.SELECT_WAREHOUSE) {
-                        scanManager.startBarcodeScan(ScanContext.WAREHOUSE_SEARCH)
-                    }
                 }
                 .onFailure { error ->
                     Timber.e(error, "Failed to load warehouses")
@@ -346,7 +401,6 @@ class InventoryViewModel @Inject constructor(
 
     fun selectWarehouse(warehouse: Warehouse) {
         Timber.d("📍 Selected warehouse: ${warehouse.name}")
-
         scanManager.stopScanning()
 
         _uiState.update {
@@ -356,6 +410,7 @@ class InventoryViewModel @Inject constructor(
                 currentStep = InventoryStep.SELECT_MODE
             )
         }
+        scanManager.setBarcodeKeepWarm(false)
 
         loadWarehouseData(warehouse.id)
     }
@@ -394,6 +449,15 @@ class InventoryViewModel @Inject constructor(
 
     // ==================== 步驟 2: 模式選擇 ====================
 
+    /**
+     * 記錄盤點開始時間
+     */
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun recordInventoryStartTime() {
+        inventoryStartTime = Instant.now()
+        Timber.d("⏱️ Inventory start time recorded: ${isoFormatter.format(inventoryStartTime)}")
+    }
+
     fun selectInventoryMode(mode: InventoryMode) {
         Timber.d("📋 Selected inventory mode: $mode")
 
@@ -408,7 +472,11 @@ class InventoryViewModel @Inject constructor(
         }
 
         when (mode) {
-            InventoryMode.FULL -> prepareFullInventory()
+            InventoryMode.FULL -> {
+                recordInventoryStartTime()
+                prepareFullInventory()
+                scanManager.setBarcodeKeepWarm(_uiState.value.scanMode == ScanMode.SINGLE)
+            }
             InventoryMode.BY_PRODUCT -> prepareProductGroups()
         }
     }
@@ -517,7 +585,6 @@ class InventoryViewModel @Inject constructor(
 
     fun deselectProduct() {
         scanManager.stopScanning()
-
         _uiState.update {
             it.copy(
                 selectedProduct = null,
@@ -526,6 +593,7 @@ class InventoryViewModel @Inject constructor(
                 inventoryItems = emptyList()
             )
         }
+        scanManager.setBarcodeKeepWarm(false)
     }
 
     // ==================== 步驟 4: 批次選擇（按貨盤點） ====================
@@ -535,7 +603,6 @@ class InventoryViewModel @Inject constructor(
 
         val product = _uiState.value.selectedProduct!!
 
-        // 找到該批次的所有籃子
         val batchBaskets = allWarehouseBaskets.filter {
             it.product?.itemcode == product.itemcode && it.batch?.batch_code == batch.batch_code
         }
@@ -547,6 +614,10 @@ class InventoryViewModel @Inject constructor(
             )
         }
 
+        if (inventoryStartTime == null) {
+            recordInventoryStartTime()
+        }
+
         _uiState.update {
             it.copy(
                 selectedBatch = batch,
@@ -556,12 +627,13 @@ class InventoryViewModel @Inject constructor(
             )
         }
 
+        scanManager.setBarcodeKeepWarm(_uiState.value.scanMode == ScanMode.SINGLE)
+
         Timber.d("📊 Batch inventory prepared: ${items.size} items")
     }
 
     fun deselectBatch() {
         scanManager.stopScanning()
-
         _uiState.update {
             it.copy(
                 selectedBatch = null,
@@ -569,52 +641,7 @@ class InventoryViewModel @Inject constructor(
                 inventoryItems = emptyList()
             )
         }
-    }
-
-    // ==================== 步驟 5: 掃描盤點 ====================
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    private fun initializeScanManager() {
-        scanManager.initialize(
-            scope = viewModelScope,
-            scanMode = _uiState.map { it.scanMode }.stateIn(
-                viewModelScope,
-                SharingStarted.Eagerly,
-                ScanMode.SINGLE
-            ),
-            canStartScan = {
-                _uiState.value.currentStep == InventoryStep.SCANNING || _uiState.value.showProductDialog
-            }
-        )
-    }
-
-    private fun observeScanResults() {
-        viewModelScope.launch {
-            scanManager.scanResults.collect { result ->
-                when (result) {
-                    is ScanResult.BarcodeScanned -> {
-
-                        val resultContext = result.context
-                        Timber.d("resultContext : $resultContext")
-
-                        when (result.context) {
-                            ScanContext.WAREHOUSE_SEARCH -> {
-                                handleWarehouseSelection(result.barcode)
-                            }
-                            ScanContext.PRODUCT_SEARCH -> {
-                                updateProductSearchQuery(result.barcode)
-                            }
-//                            ScanContext.BASKET_SCAN -> {
-//                                processScannedBasket(result.barcode)
-//                            }
-                            else -> processScannedBasket(result.barcode)
-                        }
-                    }
-                    is ScanResult.RfidScanned -> handleScannedRfidTag(result.tag.uid)
-                    is ScanResult.ClearListRequested -> {}
-                }
-            }
-        }
+        scanManager.setBarcodeKeepWarm(false)
     }
 
     // ==================== 額外項 ====================
@@ -666,13 +693,7 @@ class InventoryViewModel @Inject constructor(
             )
         }
 
-        // 延遲啟動產品搜索掃描
-        viewModelScope.launch {
-            delay(300)
-            if (_uiState.value.showProductDialog) {
-                scanManager.startBarcodeScan(ScanContext.PRODUCT_SEARCH)
-            }
-        }
+        scanManager.setBarcodeKeepWarm(true)
     }
 
     fun dismissProductDialog() {
@@ -683,6 +704,7 @@ class InventoryViewModel @Inject constructor(
                 productSearchQuery = ""
             )
         }
+        restoreBarcodeWarmForStep()
     }
 
     private fun loadProducts() {
@@ -770,46 +792,6 @@ class InventoryViewModel @Inject constructor(
             Timber.w("⚠️ No warehouse found with ID: $scannedId")
             _uiState.update {
                 it.copy(error = "找不到倉庫 ID: $scannedId")
-            }
-        }
-    }
-
-    private fun observeScanErrors() {
-        viewModelScope.launch {
-            scanManager.errors.collect { error ->
-                _uiState.update { it.copy(error = error) }
-            }
-        }
-    }
-
-    fun setScanMode(mode: ScanMode) {
-        viewModelScope.launch {
-            scanManager.changeScanMode(mode)
-            _uiState.update { it.copy(scanMode = mode) }
-        }
-    }
-
-    private fun handleScannedBarcode(barcode: String) {
-        Timber.d("🔍 Processing barcode: $barcode")
-        processScannedBasket(barcode)
-    }
-
-    private fun handleScannedRfidTag(uid: String) {
-        Timber.d("🔍 Processing RFID tag: $uid")
-        processScannedBasket(uid)
-    }
-
-    fun toggleScanFromButton() {
-        if (_uiState.value.currentStep != InventoryStep.SCANNING) {
-            _uiState.update { it.copy(error = "請先選擇盤點項目") }
-            return
-        }
-
-        viewModelScope.launch {
-            if (scanManager.scanState.value.isScanning) {
-                scanManager.stopScanning()
-            } else {
-                scanManager.startRfidScan(_uiState.value.scanMode)
             }
         }
     }
@@ -1311,14 +1293,11 @@ class InventoryViewModel @Inject constructor(
 
         when (mode) {
             InventoryMode.FULL -> {
-                // 全部盤點 - 直接提交
-                submitInventory()
+                //submitInventory()
+                showSubmitConfirmDialog()
             }
             InventoryMode.BY_PRODUCT -> {
-                // 按貨盤點 - 標記批次完成
                 markBatchAsCompleted()
-
-                // 返回批次選擇
                 _uiState.update {
                     it.copy(
                         selectedBatch = null,
@@ -1327,7 +1306,6 @@ class InventoryViewModel @Inject constructor(
                     )
                 }
             }
-
             else -> {}
         }
     }
@@ -1410,13 +1388,24 @@ class InventoryViewModel @Inject constructor(
                     }
                 }
 
-                val inventoryData = collectFullInventoryData()
+//                val inventoryData = collectFullInventoryData()
+
+                val startTime = inventoryStartTime ?: Instant.now()
+                val endTime = Instant.now()
+                val scannedRfids = scannedItems.map { it.basket.uid }
+
+                val startTimeStr = isoFormatter.format(startTime)
+                val endTimeStr = isoFormatter.format(endTime)
 
                 Timber.d("📦 ========== 提交全部盤點數據 ==========")
                 Timber.d("倉庫: ${warehouse.name}")
-                Timber.d("總籃子數: ${inventoryData.totalBaskets}")
-                Timber.d("已掃描: ${inventoryData.scannedCount}")
-                Timber.d("額外項: ${inventoryData.extraCount}")
+//                Timber.d("總籃子數: ${inventoryData.totalBaskets}")
+//                Timber.d("已掃描: ${inventoryData.scannedCount}")
+//                Timber.d("額外項: ${inventoryData.extraCount}")
+                Timber.d("倉庫: ${warehouse.id} (${warehouse.name})")
+                Timber.d("RFID 數量: ${scannedRfids.size}")
+                Timber.d("開始時間: $startTimeStr")
+                Timber.d("結束時間: $endTimeStr")
 
                 // TODO: 實現真實的 API 調用
                 // val response = apiService.submitInventory(inventoryData)
@@ -1425,17 +1414,37 @@ class InventoryViewModel @Inject constructor(
                 // }
 
                 // 模擬網絡請求
-                delay(1500)
+//                delay(1500)
+//
+//                _uiState.update {
+//                    it.copy(
+//                        isSubmitting = false,
+//                        successMessage = "✅ 盤點數據已成功提交"
+//                    )
+//                }
+//
+//                delay(1000)
+//                resetInventory()
 
-                _uiState.update {
-                    it.copy(
-                        isSubmitting = false,
-                        successMessage = "✅ 盤點數據已成功提交"
-                    )
+                basketRepository.submitInventoryRecord(
+                    warehouseId = warehouse.id,
+                    scannedRfids = scannedRfids,
+                    startTime = startTimeStr,
+                    endTime = endTimeStr,
+                    isOnline = online
+                ).onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            successMessage = "✅ 盤點數據已成功提交（${scannedRfids.size} 個籃子）"
+                        )
+                    }
+
+                    delay(1500)
+                    resetInventory()
+                }.onFailure { error ->
+                    throw error
                 }
-
-                delay(1000)
-                resetInventory()
 
             } catch (e: Exception) {
                 Timber.e(e, "提交盤點數據失敗")
@@ -1549,33 +1558,41 @@ class InventoryViewModel @Inject constructor(
                 }
 
                 // 收集盤點數據
-                val inventoryData = collectInventoryData()
+//                val inventoryData = collectInventoryData()
+
+                val startTime = inventoryStartTime ?: Instant.now()
+                val endTime = Instant.now()
+                val scannedRfids = allScannedItems.map { it.basket.uid }
+
+                val startTimeStr = isoFormatter.format(startTime)
+                val endTimeStr = isoFormatter.format(endTime)
 
                 Timber.d("📦 ========== 提交按貨盤點數據 ==========")
-                Timber.d("倉庫: ${warehouse.name}")
-                Timber.d("產品數: ${inventoryData.productSummaries.size}")
-                Timber.d("總籃子數: ${inventoryData.totalBaskets}")
-                Timber.d("總數量: ${inventoryData.totalQuantity}")
+                Timber.d("倉庫: ${warehouse.id} (${warehouse.name})")
+                Timber.d("產品數: ${_uiState.value.productGroups.size}")
+                Timber.d("RFID 數量: ${scannedRfids.size}")
+                Timber.d("開始時間: $startTimeStr")
+                Timber.d("結束時間: $endTimeStr")
 
-                // TODO: 實現真實的 API 調用
-                // val response = apiService.submitInventory(inventoryData)
-                // if (!response.success) {
-                //     throw Exception(response.message ?: "提交失敗")
-                // }
+                basketRepository.submitInventoryRecord(
+                    warehouseId = warehouse.id,
+                    scannedRfids = scannedRfids,
+                    startTime = startTimeStr,
+                    endTime = endTimeStr,
+                    isOnline = online
+                ).onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            successMessage = "✅ 盤點數據已成功提交（${scannedRfids.size} 個籃子）"
+                        )
+                    }
 
-                // 模擬網絡請求
-                delay(1500)
-
-                _uiState.update {
-                    it.copy(
-                        isSubmitting = false,
-                        successMessage = "✅ 盤點數據已成功提交"
-                    )
+                    delay(1500)
+                    resetInventory()
+                }.onFailure { error ->
+                    throw error
                 }
-
-                // 延遲後重置狀態
-                delay(1000)
-                resetInventory()
 
             } catch (e: Exception) {
                 Timber.e(e, "提交盤點數據失敗")
@@ -1590,11 +1607,30 @@ class InventoryViewModel @Inject constructor(
     }
 
     fun showSubmitConfirmDialog() {
-        if (!canSubmitByProductInventory()) {
-            _uiState.update {
-                it.copy(error = "請先完成所有產品的盤點")
+//        if (!canSubmitByProductInventory()) {
+//            _uiState.update {
+//                it.copy(error = "請先完成所有產品的盤點")
+//            }
+//            return
+//        }
+        val mode = _uiState.value.inventoryMode
+
+        when (mode) {
+            InventoryMode.FULL -> {
+                // 全部盤點：檢查有沒有已掃描項
+                if (_uiState.value.statistics.scannedItems == 0 &&
+                    _uiState.value.statistics.extraItems == 0) {
+                    _uiState.update { it.copy(error = "請至少掃描一個籃子") }
+                    return
+                }
             }
-            return
+            InventoryMode.BY_PRODUCT -> {
+                if (!canSubmitByProductInventory()) {
+                    _uiState.update { it.copy(error = "請先完成所有產品的盤點") }
+                    return
+                }
+            }
+            else -> return
         }
         _uiState.update { it.copy(showSubmitDialog = true) }
     }
@@ -1604,8 +1640,14 @@ class InventoryViewModel @Inject constructor(
     }
 
     fun confirmSubmit() {
+//        _uiState.update { it.copy(showSubmitDialog = false) }
+//        submitByProductInventory()
         _uiState.update { it.copy(showSubmitDialog = false) }
-        submitByProductInventory()
+        when (_uiState.value.inventoryMode) {
+            InventoryMode.FULL -> submitInventory()
+            InventoryMode.BY_PRODUCT -> submitByProductInventory()
+            else -> {}
+        }
     }
 
     /**
@@ -1650,6 +1692,21 @@ class InventoryViewModel @Inject constructor(
                 showProductDialog = false
             )
         }
+        restoreBarcodeWarmForStep()
+    }
+
+    /**
+     * 依當前步驟/模式決定是否保持熱機
+     */
+    private fun restoreBarcodeWarmForStep() {
+        val state = _uiState.value
+        val shouldKeepWarm = when (state.currentStep) {
+            InventoryStep.SELECT_WAREHOUSE -> true       // 等掃倉庫 QR
+            InventoryStep.SCANNING -> state.scanMode == ScanMode.SINGLE  // SINGLE 掃條碼
+            else -> false                                 // 其他步驟不掃描
+        }
+        scanManager.setBarcodeKeepWarm(shouldKeepWarm)
+        Timber.d("🔄 Restored keep-warm: step=${state.currentStep}, warm=$shouldKeepWarm")
     }
 
     /**
@@ -1666,6 +1723,9 @@ class InventoryViewModel @Inject constructor(
         }
 
         allWarehouseBaskets = emptyList()
+        inventoryStartTime = null
+
+        scanManager.setBarcodeKeepWarm(true)
     }
 
     fun clearError() {
@@ -1678,6 +1738,7 @@ class InventoryViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        scanManager.setBarcodeKeepWarm(false)
         scanManager.cleanup()
         validatingUids.clear()
     }
@@ -1688,15 +1749,14 @@ class InventoryViewModel @Inject constructor(
 data class InventoryUiState(
     val isLoading: Boolean = false,
     val isValidating: Boolean = false,
+    val scanMode: ScanMode = ScanMode.CONTINUOUS,
+
     val isSubmitting: Boolean = false,
     val isLoadingWarehouses: Boolean = false,
 
     // 步驟控制
     val currentStep: InventoryStep = InventoryStep.SELECT_WAREHOUSE,
     val inventoryMode: InventoryMode? = null,
-
-    // 掃描設置
-    val scanMode: ScanMode = ScanMode.SINGLE,
 
     // 倉庫選擇
     val warehouses: List<Warehouse> = emptyList(),
@@ -1817,4 +1877,65 @@ data class BatchInventorySummary(
     val basketCount: Int,
     val totalQuantity: Int,
     val isScanned: Boolean
+)
+
+/**
+ * 盤點模式
+ */
+enum class InventoryMode {
+    FULL,           // 全部盤點
+    BY_PRODUCT      // 按貨盤點
+}
+
+/**
+ * 盤點步驟
+ */
+enum class InventoryStep {
+    SELECT_WAREHOUSE,       // 步驟 1: 選擇倉庫
+    SELECT_MODE,           // 步驟 2: 選擇盤點模式
+    SELECT_PRODUCT,        // 步驟 3: 選擇產品（僅按貨盤點）
+    SELECT_BATCH,          // 步驟 4: 選擇批次（僅按貨盤點）
+    SCANNING,              // 步驟 5: 掃描盤點
+    SUBMIT                 // 步驟 6: 提交數據
+}
+
+/**
+ * 盤點項狀態
+ */
+enum class InventoryItemStatus {
+    PENDING,        // 待盤點（灰色）
+    SCANNED,        // 已盤點（綠色）
+    EXTRA           // 額外項（橙色 - 不在列表但實際存在）
+}
+
+/**
+ * 盤點項
+ */
+data class InventoryItem(
+    val id: String = UUID.randomUUID().toString(),
+    val basket: Basket,
+    val status: InventoryItemStatus,
+    val scanCount: Int = 0  // 掃描次數（用於追蹤重複掃描）
+)
+
+/**
+ * 批次分組
+ */
+data class BatchGroup(
+    val batch: Batch,
+    val baskets: List<Basket>,
+    val totalQuantity: Int,
+    val expiryDate: String?,
+    val isScanned: Boolean = false  // 是否完成盤點
+)
+
+/**
+ * 產品分組（含批次）
+ */
+data class ProductGroup(
+    val product: Product,
+    val batches: List<BatchGroup>,
+    val totalBaskets: Int,
+    val totalQuantity: Int,
+    val isCompleted: Boolean = false  // 是否完成所有批次盤點
 )

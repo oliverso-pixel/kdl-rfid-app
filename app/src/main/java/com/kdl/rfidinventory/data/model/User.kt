@@ -1,4 +1,3 @@
-// data/model/User.kt
 package com.kdl.rfidinventory.data.model
 
 import com.google.gson.annotations.SerializedName

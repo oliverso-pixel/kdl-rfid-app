@@ -20,46 +20,19 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
-
-enum class TransferStep {
-    SELECT_TARGET_WAREHOUSE,
-    SCANNING
-}
-
-data class ScannedTransferItem(
-    val id: String = UUID.randomUUID().toString(),
-    val basket: Basket
-)
-
-data class TransferUiState(
-    val isLoading: Boolean = false,
-    val isLoadingWarehouses: Boolean = false,
-    val isValidating: Boolean = false,
-
-    val currentStep: TransferStep = TransferStep.SELECT_TARGET_WAREHOUSE,
-    val scanMode: ScanMode = ScanMode.SINGLE,
-
-    val warehouses: List<Warehouse> = emptyList(),
-    val selectedWarehouse: Warehouse? = null,
-
-    val scannedBaskets: List<ScannedTransferItem> = emptyList(),
-
-    val showConfirmDialog: Boolean = false,
-    val error: String? = null,
-    val successMessage: String? = null
-)
 
 @RequiresApi(Build.VERSION_CODES.O)
 @HiltViewModel
 class TransferViewModel @Inject constructor(
     private val scanManager: ScanManager,
+    webSocketManager: WebSocketManager,
+    pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository,
     private val warehouseRepository: WarehouseRepository,
-    private val basketRepository: BasketRepository,
-    private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao,
-    private val authRepository: AuthRepository
+    private val basketRepository: BasketRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransferUiState())
@@ -83,42 +56,16 @@ class TransferViewModel @Inject constructor(
     private val validatingUids = mutableSetOf<String>()
 
     init {
+        Timber.d("Transfer initialized")
         loadWarehouses()
         initializeScanManager()
         observeScanResults()
         observeScanErrors()
+        observeNetworkState()
+        scanManager.setBarcodeKeepWarm(true)
     }
 
-    private fun loadWarehouses() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingWarehouses = true) }
-            warehouseRepository.getWarehouses()
-                .onSuccess { warehouses ->
-                    _uiState.update {
-                        it.copy(
-                            warehouses = warehouses.filter { w -> w.isActive },
-                            isLoadingWarehouses = false
-                        )
-                    }
-
-                    // 如果在選擇倉庫步驟，啟動條碼掃描以支援 QR Code 選擇
-                    if (_uiState.value.currentStep == TransferStep.SELECT_TARGET_WAREHOUSE) {
-                        scanManager.startBarcodeScan(ScanContext.WAREHOUSE_SEARCH)
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoadingWarehouses = false,
-                            error = "載入倉庫列表失敗: ${error.message}"
-                        )
-                    }
-                }
-        }
-    }
-
-    // ==================== 掃描管理器整合 ====================
-
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun initializeScanManager() {
         scanManager.initialize(
             scope = viewModelScope,
@@ -127,7 +74,12 @@ class TransferViewModel @Inject constructor(
                 SharingStarted.Eagerly,
                 ScanMode.SINGLE
             ),
-            canStartScan = { true }
+            canStartScan = { _uiState.value.currentStep == TransferStep.SCANNING || _uiState.value.currentStep == TransferStep.SELECT_TARGET_WAREHOUSE },
+            // 當前掃描情境
+            scanContextProvider = {
+                if (_uiState.value.currentStep == TransferStep.SELECT_TARGET_WAREHOUSE) ScanContext.WAREHOUSE_SEARCH
+                else ScanContext.BASKET_SCAN
+            }
         )
     }
 
@@ -150,13 +102,72 @@ class TransferViewModel @Inject constructor(
 
     private fun observeScanErrors() {
         viewModelScope.launch {
-            scanManager.errors.collect { error ->
-                _uiState.update { it.copy(error = error) }
+            scanManager.errors.collect { error -> _uiState.update { it.copy(error = error) } }
+        }
+    }
+    private fun observeNetworkState() {
+        viewModelScope.launch {
+            networkState.collect { state ->
+                Timber.d("📡 Transfer - Network state: $state")
+            }
+        }
+    }
+
+    fun setScanMode(mode: ScanMode) {
+        viewModelScope.launch {
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            }
+            scanManager.changeScanMode(mode)
+            _uiState.update { it.copy(scanMode = mode) }
+
+            val shouldKeepWarm = _uiState.value.currentStep == TransferStep.SELECT_TARGET_WAREHOUSE || mode == ScanMode.SINGLE
+            scanManager.setBarcodeKeepWarm(shouldKeepWarm)
+            Timber.d("🔀 Scan mode changed → $mode, keepBarcodeWarm=$shouldKeepWarm")
+        }
+    }
+
+    private fun handleScannedBarcode(barcode: String) = validateAndAddBasket(barcode)
+    private fun handleScannedRfidTag(uid: String) = validateAndAddBasket(uid)
+
+    fun toggleScanFromButton() {
+        viewModelScope.launch {
+            if (_uiState.value.currentStep != TransferStep.SCANNING) {
+                _uiState.update { it.copy(error = "請先選擇目標倉庫") }
+                return@launch
+            }
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_uiState.value.scanMode)
             }
         }
     }
 
     // ==================== 業務邏輯 ====================
+
+    private fun loadWarehouses() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingWarehouses = true) }
+            warehouseRepository.getWarehouses()
+                .onSuccess { warehouses ->
+                    _uiState.update {
+                        it.copy(
+                            warehouses = warehouses.filter { w -> w.isActive },
+                            isLoadingWarehouses = false
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingWarehouses = false,
+                            error = "載入倉庫列表失敗: ${error.message}"
+                        )
+                    }
+                }
+        }
+    }
 
     fun selectTargetWarehouse(warehouse: Warehouse) {
         scanManager.stopScanning()
@@ -166,6 +177,7 @@ class TransferViewModel @Inject constructor(
                 currentStep = TransferStep.SCANNING
             )
         }
+        scanManager.setBarcodeKeepWarm(_uiState.value.scanMode == ScanMode.SINGLE)
     }
 
     private fun handleWarehouseSelection(scannedId: String) {
@@ -178,30 +190,6 @@ class TransferViewModel @Inject constructor(
             _uiState.update { it.copy(error = "找不到倉庫 ID: $scannedId") }
         }
     }
-
-    fun setScanMode(mode: ScanMode) {
-        viewModelScope.launch {
-            scanManager.changeScanMode(mode)
-            _uiState.update { it.copy(scanMode = mode) }
-        }
-    }
-
-    fun toggleScanFromButton() {
-        if (_uiState.value.currentStep != TransferStep.SCANNING) {
-            _uiState.update { it.copy(error = "請先選擇目標倉庫") }
-            return
-        }
-        viewModelScope.launch {
-            if (scanManager.scanState.value.isScanning) {
-                scanManager.stopScanning()
-            } else {
-                scanManager.startRfidScan(_uiState.value.scanMode)
-            }
-        }
-    }
-
-    private fun handleScannedBarcode(barcode: String) = validateAndAddBasket(barcode)
-    private fun handleScannedRfidTag(uid: String) = validateAndAddBasket(uid)
 
     private fun validateAndAddBasket(uid: String) {
         if (validatingUids.contains(uid)) return
@@ -217,9 +205,7 @@ class TransferViewModel @Inject constructor(
 
             basketRepository.fetchBasket(uid, isOnline.value)
                 .onSuccess { basket ->
-                    // 2. ViewModel 自行判斷業務邏輯
                     if (basket.status == BasketStatus.IN_STOCK) {
-                        // 額外檢查：是否已經在目標倉庫
                         val targetWarehouseId = _uiState.value.selectedWarehouse?.id
                         if (basket.warehouseId == targetWarehouseId) {
                             _uiState.update { it.copy(error = "籃子已經在目標倉庫中") }
@@ -238,7 +224,12 @@ class TransferViewModel @Inject constructor(
                 }
 
             _uiState.update { it.copy(isValidating = false) }
+            delay(300)
             validatingUids.remove(uid)
+
+            if (_uiState.value.scanMode == ScanMode.SINGLE) {
+                scanManager.stopScanning()
+            }
         }
     }
 
@@ -250,17 +241,16 @@ class TransferViewModel @Inject constructor(
                 successMessage = "已加入籃子 ${basket.uid.takeLast(8)}"
             )
         }
+
+        if (_uiState.value.scanMode == ScanMode.SINGLE) {
+            scanManager.stopScanning()
+        }
     }
 
     fun removeBasket(uid: String) {
         _uiState.update { state ->
             state.copy(scannedBaskets = state.scannedBaskets.filter { it.basket.uid != uid })
         }
-    }
-
-    fun clearBaskets() {
-        scanManager.stopScanning()
-        _uiState.update { it.copy(scannedBaskets = emptyList()) }
     }
 
     // ==================== 提交 ====================
@@ -283,32 +273,6 @@ class TransferViewModel @Inject constructor(
         if (baskets.isEmpty()) return
 
         viewModelScope.launch {
-//            _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
-//
-//            // 準備資料
-//            val receivingItems = items.map { ReceivingItem(it.basket.uid, it.basket.quantity) }
-//            val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
-//
-//            // 重用收貨邏輯 (Update Basket Status to IN_STOCK at New Warehouse)
-//            warehouseRepository.receiveBaskets(
-//                items = receivingItems,
-//                warehouseId = targetWarehouse.id,
-//                updateBy = currentUser,
-//                isOnline = isOnline.value
-//            ).onSuccess {
-//                _uiState.update {
-//                    it.copy(
-//                        isLoading = false,
-//                        scannedBaskets = emptyList(),
-//                        successMessage = "✅ 成功轉換 ${items.size} 個籃子至 ${targetWarehouse.name}"
-//                    )
-//                }
-//            }.onFailure { error ->
-//                _uiState.update {
-//                    it.copy(isLoading = false, error = "轉換失敗: ${error.message}")
-//                }
-//            }
-
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
@@ -351,10 +315,12 @@ class TransferViewModel @Inject constructor(
             )
         }
 
-        viewModelScope.launch {
-            delay(300)
-            scanManager.startBarcodeScan(ScanContext.WAREHOUSE_SEARCH)
-        }
+        scanManager.setBarcodeKeepWarm(true)
+    }
+
+    fun clearBaskets() {
+        scanManager.stopScanning()
+        _uiState.update { it.copy(scannedBaskets = emptyList()) }
     }
 
     fun clearError() { _uiState.update { it.copy(error = null) } }
@@ -362,6 +328,32 @@ class TransferViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        scanManager.setBarcodeKeepWarm(false)
         scanManager.cleanup()
     }
 }
+
+// ==================== Data Classes ====================
+data class TransferUiState(
+    val isLoading: Boolean = false,
+    val isValidating: Boolean = false,
+    val scanMode: ScanMode = ScanMode.CONTINUOUS,
+    val isLoadingWarehouses: Boolean = false,
+    val currentStep: TransferStep = TransferStep.SELECT_TARGET_WAREHOUSE,
+    val warehouses: List<Warehouse> = emptyList(),
+    val selectedWarehouse: Warehouse? = null,
+    val scannedBaskets: List<ScannedTransferItem> = emptyList(),
+    val showConfirmDialog: Boolean = false,
+    val error: String? = null,
+    val successMessage: String? = null
+)
+
+enum class TransferStep {
+    SELECT_TARGET_WAREHOUSE,
+    SCANNING
+}
+
+data class ScannedTransferItem(
+    val id: String = UUID.randomUUID().toString(),
+    val basket: Basket
+)

@@ -25,10 +25,10 @@ import javax.inject.Inject
 @HiltViewModel
 class ClearViewModel @Inject constructor(
     private val scanManager: ScanManager,
-    private val basketRepository: BasketRepository,
-    private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao,
-    private val authRepository: AuthRepository
+    webSocketManager: WebSocketManager,
+    pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository,
+    private val basketRepository: BasketRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ClearUiState())
@@ -40,11 +40,8 @@ class ClearViewModel @Inject constructor(
         isOnline,
         pendingOperationDao.getPendingCount()
     ) { online, pendingCount ->
-        if (online) {
-            NetworkState.Connected
-        } else {
-            NetworkState.Disconnected(pendingCount)
-        }
+        if (online) NetworkState.Connected
+        else NetworkState.Disconnected(pendingCount)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -52,14 +49,15 @@ class ClearViewModel @Inject constructor(
     )
 
     val scanState = scanManager.scanState
-
     private val validatingUids = mutableSetOf<String>()
 
     init {
-        Timber.d("ClearViewModel initialized")
+        Timber.d("Clear initialized")
         initializeScanManager()
         observeScanResults()
         observeScanErrors()
+        observeNetworkState()
+        scanManager.setBarcodeKeepWarm(false)
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
@@ -71,9 +69,8 @@ class ClearViewModel @Inject constructor(
                 SharingStarted.Eagerly,
                 ScanMode.SINGLE
             ),
-            canStartScan = {
-                true
-            }
+            canStartScan = { true },
+            scanContextProvider = { ScanContext.BASKET_SCAN }
         )
     }
 
@@ -97,37 +94,32 @@ class ClearViewModel @Inject constructor(
 
     private fun observeScanErrors() {
         viewModelScope.launch {
-            scanManager.errors.collect { error ->
-                _uiState.update { it.copy(error = error) }
+            scanManager.errors.collect { error -> _uiState.update { it.copy(error = error) } }
+        }
+    }
+    private fun observeNetworkState() {
+        viewModelScope.launch {
+            networkState.collect { state ->
+                Timber.d("📡 Clear - Network state: $state")
             }
         }
     }
 
     fun setScanMode(mode: ScanMode) {
         viewModelScope.launch {
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            }
             scanManager.changeScanMode(mode)
             _uiState.update { it.copy(scanMode = mode) }
+
+            scanManager.setBarcodeKeepWarm(mode == ScanMode.SINGLE)
+            Timber.d("🔀 Scan mode changed → $mode, keepBarcodeWarm=${mode == ScanMode.SINGLE}")
         }
     }
 
-    private fun handleScannedBarcode(barcode: String) {
-        Timber.d("🔍 Processing barcode: $barcode")
-        fetchAndValidateBasket(barcode)
-    }
-
-    private fun handleScannedRfidTag(uid: String) {
-        Timber.d("🔍 Processing RFID tag: $uid")
-        fetchAndValidateBasket(uid)
-    }
-
-    fun clearBaskets() {
-        scanManager.stopScanning()
-        _uiState.update {
-            it.copy(
-                scannedBaskets = emptyList()
-            )
-        }
-    }
+    private fun handleScannedBarcode(barcode: String) = fetchAndValidateBasket(barcode)
+    private fun handleScannedRfidTag(uid: String) = fetchAndValidateBasket(uid)
 
     fun toggleScanFromButton() {
         viewModelScope.launch {
@@ -139,6 +131,7 @@ class ClearViewModel @Inject constructor(
         }
     }
 
+    // ==================== 業務邏輯 ====================
     /**
      * 驗證並添加籃子
      */
@@ -165,18 +158,6 @@ class ClearViewModel @Inject constructor(
 
             basketRepository.fetchBasket(uid, isOnline.value)
                 .onSuccess { basket ->
-//                    if (basket.status == BasketStatus.UNASSIGNED) {
-//                        Timber.w("⚠️ Basket is UNASSIGNED: $uid")
-//                        _uiState.update {
-//                            it.copy(
-//                                isValidating = false,
-//                                error = "籃子 ${uid.takeLast(8)} 狀態為「未配置」，無法清除\n只能清除已配置的籃子"
-//                            )
-//                        }
-//                    } else {
-//                        Timber.d("✅ Basket is valid for clearing: $uid (${basket.status})")
-//                        addBasket(basket)
-//                    }
                     when (basket.status) {
                         BasketStatus.UNASSIGNED -> {
                             Timber.d("✅ Basket valid for production: $uid")
@@ -192,12 +173,6 @@ class ClearViewModel @Inject constructor(
                 }
                 .onFailure { error ->
                     Timber.w("⚠️ Basket not found: $uid - ${error.message}")
-//                    _uiState.update {
-//                        it.copy(
-//                            isValidating = false,
-//                            error = "籃子 ${uid.takeLast(8)} 不存在或無法讀取"
-//                        )
-//                    }
                     _uiState.update {
                         it.copy(error = "籃子 ${uid.takeLast(8)} 不存在或無法讀取")
                     }
@@ -279,28 +254,6 @@ class ClearViewModel @Inject constructor(
 
             _uiState.update { it.copy(isLoading = true, showConfirmDialog = false) }
 
-//            val online = isOnline.value
-//            val uids = items.map { it.basket.uid }
-//
-//            basketRepository.clearBasketConfiguration(uids, online)
-//                .onSuccess {
-//                    _uiState.update {
-//                        it.copy(
-//                            isLoading = false,
-//                            scannedBaskets = emptyList(),
-//                            successMessage = "✅ 清除成功，共 ${uids.size} 個籃子\n可繼續掃描下一批"
-//                        )
-//                    }
-//                }
-//                .onFailure { error ->
-//                    _uiState.update {
-//                        it.copy(
-//                            isLoading = false,
-//                            error = "清除失敗: ${error.message}"
-//                        )
-//                    }
-//                }
-
             val online = isOnline.value
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
@@ -340,16 +293,17 @@ class ClearViewModel @Inject constructor(
         }
     }
 
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
+    fun clearBaskets() {
+        scanManager.stopScanning()
+        _uiState.update { it.copy(scannedBaskets = emptyList()) }
     }
 
-    fun clearSuccess() {
-        _uiState.update { it.copy(successMessage = null) }
-    }
+    fun clearError() { _uiState.update { it.copy(error = null) } }
+    fun clearSuccess() { _uiState.update { it.copy(successMessage = null) } }
 
     override fun onCleared() {
         super.onCleared()
+        scanManager.setBarcodeKeepWarm(false)
         scanManager.cleanup()
     }
 }
@@ -362,7 +316,7 @@ data class ScannedBasketItem(
 data class ClearUiState(
     val isLoading: Boolean = false,
     val isValidating: Boolean = false,
-    val scanMode: ScanMode = ScanMode.SINGLE,
+    val scanMode: ScanMode = ScanMode.CONTINUOUS,
     val scannedBaskets: List<ScannedBasketItem> = emptyList(),
     val showConfirmDialog: Boolean = false,
     val error: String? = null,

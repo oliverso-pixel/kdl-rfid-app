@@ -75,15 +75,6 @@ class AdminViewModel @Inject constructor(
 
     private val processingUids = mutableSetOf<String>()
 
-    // 登記模式：暫存的 UID 列表
-//    private val _scannedUids = MutableStateFlow<Set<String>>(emptySet())
-//    private val _scannedUidsVersion = MutableStateFlow(0)
-//    val scannedUids = _scannedUids.asStateFlow()
-//    val scannedUidsVersion = _scannedUidsVersion.asStateFlow()
-
-//    private val _uiRefreshTrigger = MutableStateFlow(0)
-//    val uiRefreshTrigger = _uiRefreshTrigger.asStateFlow()
-
     // 查詢模式：當前查詢到的籃子
     private val _queriedBasket = MutableStateFlow<Basket?>(null)
     val queriedBasket = _queriedBasket.asStateFlow()
@@ -107,12 +98,14 @@ class AdminViewModel @Inject constructor(
 
             adminRepository.getSettings()
                 .onSuccess { settings ->
+                    val maxPerScan = preferencesManager.getMaxBasketsPerScan()
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             settings = settings.copy(
                                 websocketUrl = webSocketUrl.value,
-                                websocketEnabled = webSocketEnabled.value
+                                websocketEnabled = webSocketEnabled.value,
+                                maxBasketsPerScan = maxPerScan
                             )
                         )
                     }
@@ -126,6 +119,27 @@ class AdminViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    // 新增設定方法
+    fun updateMaxBasketsPerScan(value: Int) {
+        viewModelScope.launch {
+            preferencesManager.setMaxBasketsPerScan(value)
+            _uiState.update {
+                it.copy(
+                    settings = it.settings.copy(maxBasketsPerScan = value),
+                    successMessage = "每次掃描上限已更新為 $value"
+                )
+            }
+        }
+    }
+
+    // Dialog 控制
+    fun showMaxBasketsPerScanDialog() {
+        _uiState.update { it.copy(showMaxBasketsDialog = true) }
+    }
+    fun dismissMaxBasketsPerScanDialog() {
+        _uiState.update { it.copy(showMaxBasketsDialog = false) }
     }
 
     /**
@@ -925,6 +939,7 @@ data class AdminUiState(
     val deviceName: String = "",
     val showDeviceNameDialog: Boolean = false,
     val scannedUids: List<String> = emptyList(),
+    val showMaxBasketsDialog: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null
 )
@@ -932,9 +947,10 @@ data class AdminUiState(
 data class AppSettings(
     val serverUrl: String = "http://192.9.204.144:8000",
     val websocketUrl: String = "ws://192.9.204.144:3001/ws",
-    val websocketEnabled: Boolean = false,
+    val websocketEnabled: Boolean = true,
     val scanTimeoutSeconds: Int = 30,
-    val autoSync: Boolean = true,
+    val maxBasketsPerScan: Int = 5,
+    val autoSync: Boolean = false,
     val appVersion: String = "1.0.0",
     val databaseVersion: Int = 1
 )

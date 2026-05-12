@@ -20,11 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.*
-import com.kdl.rfidinventory.presentation.ui.components.BasketCard
-import com.kdl.rfidinventory.presentation.ui.components.BasketCardMode
-import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
-import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
-import com.kdl.rfidinventory.presentation.ui.components.ShippingStatistics
+import com.kdl.rfidinventory.presentation.ui.components.*
 import com.kdl.rfidinventory.util.ScanMode
 import timber.log.Timber
 
@@ -292,8 +288,20 @@ fun ShippingVerifyScreen(
 
         // 確認對話框
         if (uiState.showConfirmDialog) {
-            ConfirmShippingDialog(
-                items = uiState.scannedBaskets,
+//            ConfirmShippingDialog(
+//                items = uiState.scannedBaskets,
+//                onDismiss = { viewModel.dismissConfirmDialog() },
+//                onConfirm = { viewModel.confirmShipping() }
+//            )
+            ConfirmSubmitDialog(
+                title = "確認出貨",
+                icon = Icons.Default.LocalShipping,
+                description = "您即將出貨以下籃子，出貨後將無法撤銷：",
+                products = uiState.scannedBaskets.map { it.basket }.toProductSummaries(),
+                footerText = "📦 確認後這些籃子將標記為「已出貨」並從庫存中移除",
+                confirmText = "確認出貨",
+                confirmIcon = Icons.Default.LocalShipping,
+                confirmColor = MaterialTheme.colorScheme.primary,
                 onDismiss = { viewModel.dismissConfirmDialog() },
                 onConfirm = { viewModel.confirmShipping() }
             )

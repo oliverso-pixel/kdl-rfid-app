@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.model.BasketStatus
@@ -24,6 +23,7 @@ import com.kdl.rfidinventory.data.model.getStatusErrorMessage
 import com.kdl.rfidinventory.presentation.ui.screens.warehouse.inventory.InventoryItemStatus
 import com.kdl.rfidinventory.presentation.ui.theme.BackgroundDark
 import com.kdl.rfidinventory.presentation.ui.theme.BasketStatusColors
+import com.kdl.rfidinventory.util.toDateOnly
 import kotlinx.coroutines.delay
 
 /**
@@ -264,10 +264,13 @@ fun BasketCard(
 
             // 生產日期
             basket.productionDate?.let { date ->
-                InfoRow(label = "生產日期", value = date)
+                InfoRow(label = "生產日期", value = date.toDateOnly())
             }
 
             //  過期日期
+            basket.expireDate?.let { date ->
+                InfoRow(label = "到期日期", value = date.toDateOnly())
+            }
 
             // 收貨/盤點模式：狀態顯示
             if (mode == BasketCardMode.RECEIVING ||
@@ -569,7 +572,7 @@ private fun BasketHeaderRow(
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = uid,
+                text = uid.takeLast(7),
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

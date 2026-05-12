@@ -78,14 +78,6 @@ fun NavGraph(
             )
         }
 
-//        composable(Screen.Main.route) {
-//            MainScreen(
-//                navController = navController,
-//                onLogout = TODO(),
-//                viewModel = TODO()
-//            )
-//        }
-
         composable(Screen.Production.route) {
             ProductionScreen(
                 onNavigateBack = { navController.popBackStack() }

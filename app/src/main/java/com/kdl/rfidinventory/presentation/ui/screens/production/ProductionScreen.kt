@@ -20,16 +20,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.*
-import com.kdl.rfidinventory.presentation.ui.components.BasketCard
-import com.kdl.rfidinventory.presentation.ui.components.BasketCardMode
-import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
-import com.kdl.rfidinventory.presentation.ui.components.ProductSelectionCard
-import com.kdl.rfidinventory.presentation.ui.components.ProductSelectionDialog
-import com.kdl.rfidinventory.presentation.ui.components.ProductionStatistics
-import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
+import com.kdl.rfidinventory.presentation.ui.components.*
 import com.kdl.rfidinventory.util.ScanMode
 import com.kdl.rfidinventory.util.ScanModeAvailability
 import com.kdl.rfidinventory.util.ScanType
+import com.kdl.rfidinventory.util.toDateOnly
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -202,7 +197,7 @@ fun ProductionScreen(
                                 batch = uiState.selectedBatch,
                                 warehouseId = null,
                                 quantity = scannedBasket.quantity,
-                                productionDate = uiState.selectedBatch?.productionDate,
+                                productionDate = uiState.selectedBatch?.productionDate?.toDateOnly(),
                                 expireDate = null,
                                 status = BasketStatus.IN_PRODUCTION,
                                 updateBy = null
@@ -250,10 +245,52 @@ fun ProductionScreen(
 
     // 確認對話框
     if (uiState.showConfirmDialog) {
-        ConfirmProductionDialog(
-            product = uiState.selectedProduct,
-            batch = uiState.selectedBatch,
-            baskets = uiState.scannedBaskets,
+        val product = uiState.selectedProduct
+        val batch = uiState.selectedBatch
+
+        // 將 ScannedBasket 轉換為 ConfirmProductSummary
+        val productSummaries = remember(uiState.scannedBaskets, product) {
+            if (product != null && uiState.scannedBaskets.isNotEmpty()) {
+                listOf(
+                    ConfirmProductSummary(
+                        productName = product.name,
+                        basketCount = uiState.scannedBaskets.size,
+                        totalQuantity = uiState.scannedBaskets.sumOf { it.quantity },
+                        baskets = uiState.scannedBaskets.map { scanned ->
+                            ConfirmBasketItem(
+                                uid = scanned.uid,
+                                tagCode = scanned.tagCode,
+                                status = BasketStatus.IN_PRODUCTION,
+                                quantity = scanned.quantity
+                            )
+                        }
+                    )
+                )
+            } else emptyList()
+        }
+
+        ConfirmSubmitDialog(
+            title = "確認生產配置",
+            icon = Icons.Default.Factory,               // 工廠圖示
+            iconTint = MaterialTheme.colorScheme.primary,
+            description = "您即將將以下籃子配置為生產狀態，提交後將無法修改：",
+            contextInfo = batch?.let {
+                ConfirmContextInfo(
+                    icon = Icons.Default.DateRange,
+                    label = "生產批次",
+                    value = "${it.batch_code} (${it.productionDate.toDateOnly()})"
+                )
+            },
+            products = productSummaries,
+            footerText = batch?.let {
+                val totalQty = uiState.scannedBaskets.sumOf { b -> b.quantity }
+                val afterSubmit = it.producedQuantity + totalQty
+                "提交後生產進度：$afterSubmit / ${it.targetQuantity}"
+            },
+            confirmText = "確認提交",
+            confirmIcon = Icons.Default.Check,
+            confirmColor = MaterialTheme.colorScheme.primary,
+            isSubmitting = uiState.isLoading,
             onDismiss = { viewModel.dismissDialog() },
             onConfirm = { viewModel.submitProduction() }
         )
@@ -394,7 +431,7 @@ private fun BatchSelectionCard(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "生產日期: ${selectedBatch.productionDate}",
+                        text = "生產日期: ${selectedBatch.productionDate.toDateOnly()}",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
@@ -486,20 +523,6 @@ private fun BatchSelectionDialog(
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-//                            Text(
-//                                text = batch.batch_code,
-//                                style = MaterialTheme.typography.titleMedium
-//                            )
-//                            Spacer(modifier = Modifier.height(4.dp))
-//                            Text(
-//                                text = "生產日期: ${batch.productionDate}",
-//                                style = MaterialTheme.typography.bodySmall
-//                            )
-//                            Text(
-//                                text = "剩餘: ${batch.remainingQuantity} / ${batch.totalQuantity}",
-//                                style = MaterialTheme.typography.bodySmall,
-//                                color = MaterialTheme.colorScheme.onSurfaceVariant
-//                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -590,7 +613,7 @@ private fun BatchSelectionDialog(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = batch.productionDate,
+                                        text = batch.productionDate.toDateOnly(),
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
@@ -603,7 +626,7 @@ private fun BatchSelectionDialog(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         Text(
-                                            text = expiry,
+                                            text = expiry.toDateOnly(),
                                             style = MaterialTheme.typography.bodySmall
                                         )
                                     }
@@ -644,52 +667,6 @@ private fun BatchSelectionDialog(
             }
         },
         confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
-}
-
-@Composable
-private fun ConfirmProductionDialog(
-    product: Product?,
-    batch: Batch?,
-    baskets: List<ScannedBasket>,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("確認生產配置") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                product?.let {
-                    Text("產品: ${it.name}", style = MaterialTheme.typography.bodyLarge)
-                }
-                batch?.let {
-                    Text("批次: ${it.batch_code}", style = MaterialTheme.typography.bodyMedium)
-                }
-                Divider()
-                Text(
-                    "共 ${baskets.size} 個籃子",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                val totalQuantity = baskets.sumOf { it.quantity }
-                Text(
-                    "總數量: $totalQuantity",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = onConfirm) {
-                Text("確認提交")
-            }
-        },
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("取消")

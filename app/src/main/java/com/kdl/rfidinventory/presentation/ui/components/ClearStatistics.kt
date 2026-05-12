@@ -90,7 +90,7 @@ fun ClearStatistics(
                 )
             }
 
-            // ⭐ 有效籃子數量
+            // 有效籃子數量
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

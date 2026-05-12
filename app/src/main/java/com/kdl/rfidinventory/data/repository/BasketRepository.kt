@@ -13,6 +13,7 @@ import com.kdl.rfidinventory.data.remote.dto.request.BulkCreateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.BulkUpdateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
 import com.kdl.rfidinventory.data.remote.dto.request.CreateBasketItemDto
+import com.kdl.rfidinventory.data.remote.dto.request.InventoryRecordRequest
 import com.kdl.rfidinventory.data.remote.dto.response.BulkCreateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -262,6 +263,63 @@ class BasketRepository @Inject constructor(
             }
         } catch (e: Exception) {
             Timber.e(e, "Bulk register error")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 提交盤點記錄到 /inventory/record
+     *
+     * @param warehouseId 倉庫 ID
+     * @param scannedRfids 已掃描的 RFID 列表（包含 SCANNED + EXTRA）
+     * @param startTime 盤點開始時間 (ISO 8601)
+     * @param endTime 盤點結束時間 (ISO 8601)
+     * @param isOnline 是否在線
+     */
+    @RequiresApi(Build.VERSION_CODES.O)
+    suspend fun submitInventoryRecord(
+        warehouseId: String,
+        scannedRfids: List<String>,
+        startTime: String,
+        endTime: String,
+        isOnline: Boolean
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val request = InventoryRecordRequest(
+                warehouse_id = warehouseId,
+                scanned_rfids = scannedRfids,
+                start_time = startTime,
+                end_time = endTime
+            )
+
+            if (isOnline) {
+                val response = apiService.submitInventoryRecord(request)
+
+                if (response.isSuccessful) {
+                    Timber.d("✅ Inventory record submitted: warehouse=$warehouseId, count=${scannedRfids.size}")
+                    Timber.d("   Time range: $startTime → $endTime")
+                    Result.success(Unit)
+                } else {
+                    val errorMsg = response.errorBody()?.string() ?: response.message()
+                    Timber.e("❌ Submit inventory failed: ${response.code()} - $errorMsg")
+                    Result.failure(Exception("提交盤點記錄失敗: $errorMsg"))
+                }
+            } else {
+                // 離線模式：保存到 PendingOperation
+                val payloadJson = Json.encodeToString(request)
+                val operation = PendingOperationEntity(
+                    operationType = OperationType.INVENTORY,
+                    uid = "INVENTORY-${System.currentTimeMillis()}",
+                    payload = payloadJson,
+                    timestamp = System.currentTimeMillis()
+                )
+                pendingOperationDao.insertOperation(operation)
+
+                Timber.d("📱 Offline inventory record saved for sync")
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Submit inventory record error")
             Result.failure(e)
         }
     }

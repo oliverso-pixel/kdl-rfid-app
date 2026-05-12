@@ -191,9 +191,21 @@ fun ReceivingScreen(
 
     // 確認收貨對話框
     if (uiState.showConfirmDialog) {
-        ConfirmReceivingDialog(
-            items = uiState.scannedBaskets,
-            warehouse = uiState.selectedWarehouse!!,
+        ConfirmSubmitDialog(
+            title = "確認收貨",
+            icon = Icons.Default.Inventory2,
+            iconTint = MaterialTheme.colorScheme.primary,
+            description = "您即將收貨以下籃子，收貨後將無法修改：",
+            contextInfo = ConfirmContextInfo(
+                icon = Icons.Default.Warehouse,
+                label = "收貨倉庫",
+                value = uiState.selectedWarehouse?.name ?: ""
+            ),
+            products = uiState.scannedBaskets.map { it.basket }.toProductSummaries(),
+            footerText = "✅ 收貨後籃子狀態將變更為「在庫中」",
+            confirmText = "確認收貨",
+            confirmIcon = Icons.Default.Check,
+            confirmColor = MaterialTheme.colorScheme.primary,
             onDismiss = { viewModel.dismissConfirmDialog() },
             onConfirm = { viewModel.confirmReceiving() }
         )

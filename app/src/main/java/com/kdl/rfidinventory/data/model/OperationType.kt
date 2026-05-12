@@ -3,6 +3,7 @@ package com.kdl.rfidinventory.data.model
 enum class OperationType {
     PRODUCTION_START,
     WAREHOUSE_RECEIVE,
+    INVENTORY,
     SHIPPING_SHIP,
     SHIPPING_VERIFY,
     SAMPLING,

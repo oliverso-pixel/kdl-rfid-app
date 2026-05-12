@@ -3,6 +3,7 @@ package com.kdl.rfidinventory.data.remote.api
 import com.kdl.rfidinventory.data.remote.dto.request.BulkCreateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.BulkUpdateRequest
 import com.kdl.rfidinventory.data.remote.dto.request.CreateBasketRequest
+import com.kdl.rfidinventory.data.remote.dto.request.InventoryRecordRequest
 import com.kdl.rfidinventory.data.remote.dto.request.SamplingRequest
 import com.kdl.rfidinventory.data.remote.dto.request.ShipBasketsRequest
 import com.kdl.rfidinventory.data.remote.dto.request.UpdateBasketRequest
@@ -13,6 +14,7 @@ import com.kdl.rfidinventory.data.remote.dto.response.BulkCreateResponse
 import com.kdl.rfidinventory.data.remote.dto.response.BulkUpdateResponse
 import com.kdl.rfidinventory.data.remote.dto.response.DailyProductResponse
 import com.kdl.rfidinventory.data.remote.dto.response.GenericResponse
+import com.kdl.rfidinventory.data.remote.dto.response.InventoryRecordResponse
 import com.kdl.rfidinventory.data.remote.dto.response.ProductListResponse
 import com.kdl.rfidinventory.data.remote.dto.response.ProductionBatchResponse
 import com.kdl.rfidinventory.data.remote.dto.response.WarehouseResponse
@@ -77,12 +79,22 @@ interface ApiService {
         @Query("expire_date") expireDate: String
     ): retrofit2.Response<List<ProductionBatchResponse>>
 
+    // ==================== Inventory API ====================
+
+    /**
+     * 提交盤點記錄
+     * POST /api/v1/inventory/record
+     */
+    @POST("inventory/record")
+    suspend fun submitInventoryRecord(
+        @Body request: InventoryRecordRequest
+    ): retrofit2.Response<InventoryRecordResponse>
+
     // ==================== Shipping API ====================
     // ==================== Sampling API ====================
     // ==================== Clear API ====================
     // ==================== Admin API ====================
     // 籃子查詢：GET /api/v1/baskets/{rfid}
-    // 注意：這裡不使用 ApiResponse 包裝，因為 curl 顯示直接回傳 JSON 物件或 {"detail":...}
     @GET("baskets/{rfid}")
     suspend fun getBasketByRfid(@Path("rfid") rfid: String): retrofit2.Response<BasketDetailResponse>
 
@@ -102,7 +114,6 @@ interface ApiService {
     suspend fun bulkUpdateBaskets(
         @Body request: BulkUpdateRequest
     ): retrofit2.Response<BulkUpdateResponse>
-
 
 
     @GET("baskets/{uid}")

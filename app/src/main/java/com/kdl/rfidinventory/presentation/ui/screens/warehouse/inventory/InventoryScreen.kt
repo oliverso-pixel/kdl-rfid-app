@@ -25,11 +25,7 @@ import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Batch
 import com.kdl.rfidinventory.data.model.Product
 import com.kdl.rfidinventory.data.model.Warehouse
-import com.kdl.rfidinventory.presentation.ui.components.BasketCard
-import com.kdl.rfidinventory.presentation.ui.components.BasketCardMode
-import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
-import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
-import com.kdl.rfidinventory.presentation.ui.components.WarehouseSelectionCard
+import com.kdl.rfidinventory.presentation.ui.components.*
 import com.kdl.rfidinventory.util.Constants
 import com.kdl.rfidinventory.util.ScanMode
 import java.time.LocalDate
@@ -135,24 +131,6 @@ fun InventoryScreen(
                     )
                 }
             }
-            // 完成/提交按鈕（僅掃描步驟顯示）
-//            if (uiState.currentStep == InventoryStep.SCANNING &&
-//                uiState.statistics.scannedItems > 0) {
-//                ExtendedFloatingActionButton(
-//                    text = {
-//                        Text(
-//                            when (uiState.inventoryMode) {
-//                                InventoryMode.FULL -> "提交盤點"
-//                                InventoryMode.BY_PRODUCT -> "完成此批次"
-//                                else -> "完成"
-//                            }
-//                        )
-//                    },
-//                    icon = { Icon(Icons.Default.Check, contentDescription = null) },
-//                    onClick = { viewModel.completeCurrent() },
-//                    containerColor = MaterialTheme.colorScheme.primary
-//                )
-//            }
         }
     ) { paddingValues ->
         Column(
@@ -185,13 +163,9 @@ fun InventoryScreen(
                     ProductSelectionStep(
                         productGroups = uiState.productGroups,
                         onSelectProduct = { viewModel.selectProduct(it) },
-                        onSubmit = { viewModel.submitByProductInventory() },
                         canSubmit = viewModel.canSubmitByProductInventory(),
                         isSubmitting = uiState.isSubmitting,
-                        showSubmitDialog = uiState.showSubmitDialog,
-                        onShowSubmitDialog = { viewModel.showSubmitConfirmDialog() },
-                        onDismissDialog = { viewModel.dismissSubmitDialog() },
-                        onConfirmSubmit = { viewModel.confirmSubmit() }
+                        onShowSubmitDialog = { viewModel.showSubmitConfirmDialog() }
                     )
                 }
 
@@ -234,6 +208,53 @@ fun InventoryScreen(
                 else -> {}
             }
         }
+    }
+
+    if (uiState.showSubmitDialog) {
+        val products = when (uiState.inventoryMode) {
+            InventoryMode.FULL -> {
+                // 全部盤點：從 inventoryItems 篩選已掃描 + 額外項
+                uiState.inventoryItems
+                    .filter {
+                        it.status == InventoryItemStatus.SCANNED ||
+                                it.status == InventoryItemStatus.EXTRA
+                    }
+                    .map { it.basket }
+                    .toProductSummaries()
+            }
+            InventoryMode.BY_PRODUCT -> {
+                // 按貨盤點：使用已完成批次的籃子
+                uiState.productGroups.flatMap { group ->
+                    group.batches.filter { it.isScanned }.flatMap { it.baskets }
+                }.toProductSummaries()
+            }
+            else -> emptyList()
+        }
+
+        val title = when (uiState.inventoryMode) {
+            InventoryMode.FULL -> "確認提交盤點數據（全部盤點）"
+            InventoryMode.BY_PRODUCT -> "確認提交盤點數據"
+            else -> "確認提交"
+        }
+
+        ConfirmSubmitDialog(
+            title = title,
+            icon = Icons.Default.Inventory,
+            iconTint = MaterialTheme.colorScheme.primary,
+            description = "您即將提交以下盤點數據，提交後將無法修改：",
+            contextInfo = uiState.selectedWarehouse?.let {
+                ConfirmContextInfo(
+                    icon = Icons.Default.Warehouse,
+                    label = "盤點倉庫",
+                    value = it.name
+                )
+            },
+            products = products,
+            confirmText = "確認提交",
+            confirmColor = Color(0xFF4CAF50),
+            onDismiss = { viewModel.dismissSubmitDialog() },
+            onConfirm = { viewModel.confirmSubmit() }
+        )
     }
 
     if (uiState.showQuantityConfirmDialog) {
@@ -529,13 +550,9 @@ private fun ModeCard(
 private fun ProductSelectionStep(
     productGroups: List<ProductGroup>,
     onSelectProduct: (Product) -> Unit,
-    onSubmit: () -> Unit,
     canSubmit: Boolean,
     isSubmitting: Boolean,
-    showSubmitDialog: Boolean,
     onShowSubmitDialog: () -> Unit,
-    onDismissDialog: () -> Unit,
-    onConfirmSubmit: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -588,7 +605,7 @@ private fun ProductSelectionStep(
             Spacer(modifier = Modifier.height(8.dp))
 
             Button(
-                onClick = onShowSubmitDialog,  // 改為顯示對話框
+                onClick = onShowSubmitDialog,
                 enabled = canSubmit && !isSubmitting,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -667,13 +684,13 @@ private fun ProductSelectionStep(
     }
 
     // 確認對話框
-    if (showSubmitDialog) {
-        SubmitConfirmDialog(
-            productGroups = productGroups,
-            onDismiss = onDismissDialog,
-            onConfirm = onConfirmSubmit
-        )
-    }
+//    if (showSubmitDialog) {
+//        SubmitConfirmDialog(
+//            productGroups = productGroups,
+//            onDismiss = onDismissDialog,
+//            onConfirm = onConfirmSubmit
+//        )
+//    }
 }
 
 // ==================== 提交確認對話框 ====================

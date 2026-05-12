@@ -1,4 +1,3 @@
-// data/remote/api/DeviceApi.kt
 package com.kdl.rfidinventory.data.remote.api
 
 import com.kdl.rfidinventory.data.model.DeviceRegistrationRequest

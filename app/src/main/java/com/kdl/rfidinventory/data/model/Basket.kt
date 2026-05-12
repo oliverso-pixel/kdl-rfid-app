@@ -1,19 +1,5 @@
 package com.kdl.rfidinventory.data.model
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Abc
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Dangerous
-import androidx.compose.material.icons.filled.Help
-import androidx.compose.material.icons.filled.Inventory
-import androidx.compose.material.icons.filled.LocalShipping
-import androidx.compose.material.icons.filled.Science
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-
 data class Basket (
     val uid: String,
     val tagCode: String? = null,
@@ -55,63 +41,6 @@ fun getBasketStatusText(status: BasketStatus): String {
         BasketStatus.SAMPLING -> "抽樣中"
         BasketStatus.DAMAGED -> "已損壞"
 //        else -> status.toString()
-    }
-}
-
-@Composable
-fun getStatusColor(status: BasketStatus): Color {
-    return when (status) {
-        BasketStatus.UNASSIGNED -> MaterialTheme.colorScheme.outline
-        BasketStatus.IN_PRODUCTION -> Color(0xFFFF9800)
-        BasketStatus.RECEIVED -> Color(0xFF2196F3)
-        BasketStatus.IN_STOCK -> Color(0xFF4CAF50)
-        BasketStatus.LOADING -> Color(0xFF9C27B0)
-        BasketStatus.SHIPPED -> Color(0xFF9C27B0)
-        BasketStatus.DELIVERED -> Color(0xFFFFEB3B)
-        BasketStatus.RETURNED -> Color(0xFFFFEB3B)
-        BasketStatus.SAMPLING -> Color(0xFFFFEB3B)
-        BasketStatus.DAMAGED -> Color(0xFF656565)
-    }
-}
-
-@Composable
-fun getStatusColor_BMS_tag(status: BasketStatus): Color {
-    return when (status) {
-        BasketStatus.UNASSIGNED -> MaterialTheme.colorScheme.secondaryContainer
-        BasketStatus.IN_PRODUCTION -> MaterialTheme.colorScheme.primaryContainer
-        BasketStatus.RECEIVED -> MaterialTheme.colorScheme.tertiaryContainer
-        BasketStatus.IN_STOCK -> MaterialTheme.colorScheme.tertiaryContainer
-        BasketStatus.SHIPPED -> MaterialTheme.colorScheme.surfaceVariant
-        BasketStatus.SAMPLING -> MaterialTheme.colorScheme.errorContainer
-        BasketStatus.DAMAGED -> MaterialTheme.colorScheme.errorContainer
-        else -> MaterialTheme.colorScheme.outline
-    }
-}
-
-@Composable
-fun getStatusColor_BMS(status: BasketStatus): Color {
-    return when (status) {
-        BasketStatus.UNASSIGNED -> MaterialTheme.colorScheme.onSecondaryContainer
-        BasketStatus.IN_PRODUCTION -> MaterialTheme.colorScheme.onPrimaryContainer
-        BasketStatus.RECEIVED -> MaterialTheme.colorScheme.onTertiaryContainer
-        BasketStatus.IN_STOCK -> MaterialTheme.colorScheme.onTertiaryContainer
-        BasketStatus.SHIPPED -> MaterialTheme.colorScheme.onSurfaceVariant
-        BasketStatus.SAMPLING -> MaterialTheme.colorScheme.onErrorContainer
-        BasketStatus.DAMAGED -> MaterialTheme.colorScheme.onErrorContainer
-        else -> MaterialTheme.colorScheme.outline
-    }
-}
-
-fun getStatusIcon(status: BasketStatus): ImageVector {
-    return when (status) {
-        BasketStatus.UNASSIGNED -> Icons.Default.Help
-        BasketStatus.IN_PRODUCTION -> Icons.Default.Build
-        BasketStatus.RECEIVED -> Icons.Default.Check
-        BasketStatus.IN_STOCK -> Icons.Default.Inventory
-        BasketStatus.SHIPPED -> Icons.Default.LocalShipping
-        BasketStatus.SAMPLING -> Icons.Default.Science
-        BasketStatus.DAMAGED -> Icons.Default.Dangerous
-        else -> Icons.Default.Abc
     }
 }
 

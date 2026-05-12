@@ -124,31 +124,6 @@ fun ProductSelectionDialog(
 ) {
     val focusRequester = remember { FocusRequester() }
     var isDialogReady by remember { mutableStateOf(false) }
-    var previousQuery by remember { mutableStateOf("") }
-
-    // 監聽 searchQuery 變化，檢測條碼掃描
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.isNotEmpty() && searchQuery != previousQuery) {
-            val queryLength = searchQuery.length
-            val previousLength = previousQuery.length
-
-            // 檢測快速輸入（條碼掃描的特征）
-            if (queryLength - previousLength >= 5) {
-                Timber.d("📦 Barcode detected via TextField: $searchQuery")
-
-                // 自動搜索並選擇
-                kotlinx.coroutines.delay(100)
-                val filteredProducts = filterProducts(products, searchQuery)
-
-                if (filteredProducts.size == 1) {
-                    Timber.d("🎯 Auto-selecting product: ${filteredProducts.first().name}")
-                    onProductSelected(filteredProducts.first())
-                }
-            }
-
-            previousQuery = searchQuery
-        }
-    }
 
     // 初始化焦點
     LaunchedEffect(Unit) {
@@ -189,7 +164,6 @@ fun ProductSelectionDialog(
                 focusRequester = focusRequester,
                 onClearQuery = {
                     onSearchQueryChange("")
-                    previousQuery = ""
                 }
             )
         },

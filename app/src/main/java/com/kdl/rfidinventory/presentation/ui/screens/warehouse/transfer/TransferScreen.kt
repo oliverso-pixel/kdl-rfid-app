@@ -132,9 +132,20 @@ fun TransferScreen(
     }
 
     if (uiState.showConfirmDialog) {
-        ConfirmTransferDialog(
-            count = uiState.scannedBaskets.size,
-            targetWarehouseName = uiState.selectedWarehouse?.name ?: "",
+        ConfirmSubmitDialog(
+            title = "確認轉換倉庫",
+            icon = Icons.Default.SwapHoriz,
+            description = "您即將轉移以下籃子，轉換後狀態將更新為「在庫中」：",
+            contextInfo = ConfirmContextInfo(
+                icon = Icons.Default.Warehouse,
+                label = "目標倉庫",
+                value = uiState.selectedWarehouse?.name ?: ""
+            ),
+            products = uiState.scannedBaskets.map { it.basket }.toProductSummaries(),
+            footerText = "🔄 轉換後籃子將歸屬於新倉庫",
+            confirmText = "確認轉換",
+            confirmIcon = Icons.Default.SwapHoriz,
+            confirmColor = MaterialTheme.colorScheme.primary,
             onDismiss = { viewModel.dismissConfirmDialog() },
             onConfirm = { viewModel.submitTransfer() }
         )
@@ -309,31 +320,4 @@ private fun ScanningContent(
             )
         }
     }
-}
-
-@Composable
-private fun ConfirmTransferDialog(
-    count: Int,
-    targetWarehouseName: String,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.SwapHoriz, null) },
-        title = { Text("確認轉換倉庫") },
-        text = {
-            Text("確定將 $count 個籃子轉移到「$targetWarehouseName」嗎？\n\n這些籃子的狀態將更新為「在庫中」。")
-        },
-        confirmButton = {
-            Button(onClick = onConfirm) {
-                Text("確認轉換")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
 }

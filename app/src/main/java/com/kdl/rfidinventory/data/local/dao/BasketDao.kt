@@ -81,15 +81,4 @@ interface BasketDao {
      */
     @Query("SELECT COUNT(*) FROM baskets WHERE status = :status")
     suspend fun countBasketsByStatus(status: BasketStatus): Int
-
-    /**
-     * 獲取即將過期的籃子（批次過期日期在指定天數內）
-     */
-//    @Query("""
-//        SELECT * FROM baskets
-//        WHERE expiryDate IS NOT NULL
-//        AND expiryDate <= :expiryThreshold
-//        ORDER BY expiryDate ASC
-//    """)
-//    suspend fun getExpiringBaskets(expiryThreshold: String): List<BasketEntity>
 }

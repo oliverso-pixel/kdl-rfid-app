@@ -114,6 +114,22 @@ fun AdminScreen(
                     onClick = null
                 )
             }
+            // 掃描設定
+            SettingsSection(title = "掃描設定") {
+                SettingItem(
+                    icon = Icons.Default.Numbers,
+                    title = "每次掃描籃子上限",
+                    subtitle = "${uiState.settings.maxBasketsPerScan} 個 / 次",
+                    onClick = { viewModel.showMaxBasketsPerScanDialog() }
+                )
+
+                SettingItem(
+                    icon = Icons.Default.Timer,
+                    title = "掃描逾時",
+                    subtitle = "${uiState.settings.scanTimeoutSeconds} 秒",
+                    onClick = { viewModel.showScanTimeoutDialog() }
+                )
+            }
             // 同步設定區
             SettingsSection(title = "資料同步") {
                 // 待同步記錄
@@ -383,6 +399,17 @@ fun AdminScreen(
                 TextButton(onClick = { viewModel.dismissClearDataDialog() }) {
                     Text("取消")
                 }
+            }
+        )
+    }
+
+    if (uiState.showMaxBasketsDialog) {
+        MaxBasketsDialog(
+            currentValue = uiState.settings.maxBasketsPerScan,
+            onDismiss = { viewModel.dismissMaxBasketsPerScanDialog() },
+            onConfirm = { v ->
+                viewModel.updateMaxBasketsPerScan(v)
+                viewModel.dismissMaxBasketsPerScanDialog()
             }
         )
     }
@@ -819,6 +846,61 @@ private fun ScanTimeoutDialog(
                     ) {
                         Text("確認")
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MaxBasketsDialog(
+    currentValue: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var value by remember { mutableStateOf(currentValue) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text("每次掃描籃子上限", style = MaterialTheme.typography.headlineSmall)
+
+                Text(
+                    "當前上限：$value 個",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Slider(
+                    value = value.toFloat(),
+                    onValueChange = { value = it.toInt() },
+                    valueRange = 1f..30f,
+                    steps = 28
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("1 個", style = MaterialTheme.typography.bodySmall)
+                    Text("30 個", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Text(
+                    "達到上限後將自動停止掃描並提示提交",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
+                ) {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                    Button(onClick = { onConfirm(value) }) { Text("確認") }
                 }
             }
         }

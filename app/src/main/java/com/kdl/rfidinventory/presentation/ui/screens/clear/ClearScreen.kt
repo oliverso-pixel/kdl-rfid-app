@@ -16,12 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.BasketStatus
-import com.kdl.rfidinventory.data.model.getBasketStatusText
-import com.kdl.rfidinventory.presentation.ui.components.BasketCard
-import com.kdl.rfidinventory.presentation.ui.components.BasketCardMode
-import com.kdl.rfidinventory.presentation.ui.components.ClearStatistics
-import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
-import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
+import com.kdl.rfidinventory.presentation.ui.components.*
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,7 +52,6 @@ fun ClearScreen(
         }
     }
 
-    // 成功提示
     LaunchedEffect(uiState.successMessage) {
         uiState.successMessage?.let { message ->
             snackbarHostState.showSnackbar(
@@ -149,12 +143,10 @@ fun ClearScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // 警告卡片
                 item {
                     WarningCard()
                 }
 
-                // 掃描設置
                 item {
                     ScanSettingsCard(
                         scanMode = uiState.scanMode,
@@ -175,7 +167,6 @@ fun ClearScreen(
                     )
                 }
 
-                // 已掃描籃子列表
                 if (uiState.scannedBaskets.isNotEmpty()) {
                     item {
                         Row(
@@ -190,7 +181,6 @@ fun ClearScreen(
                                 style = MaterialTheme.typography.titleMedium
                             )
 
-                            // 狀態統計
                             val invalidCount = uiState.scannedBaskets.size - validBasketCount
 
                             if (invalidCount > 0) {
@@ -220,7 +210,6 @@ fun ClearScreen(
                         }
                     }
 
-                    // 使用唯一 ID 作為 key
                     items(
                         items = uiState.scannedBaskets,
                         key = { item -> item.id }
@@ -241,10 +230,43 @@ fun ClearScreen(
         }
     }
 
-    // 確認對話框
     if (uiState.showConfirmDialog) {
-        ConfirmClearDialog(
-            items = uiState.scannedBaskets,
+        val productSummaries = remember(uiState.scannedBaskets) {
+            uiState.scannedBaskets
+                .groupBy { it.basket.product?.name ?: "未配置產品" }
+                .map { (productName, items) ->
+                    ConfirmProductSummary(
+                        productName = productName,
+                        basketCount = items.size,
+                        totalQuantity = items.sumOf { it.basket.quantity ?: 0 },
+                        baskets = items.map { scanned ->
+                            ConfirmBasketItem(
+                                uid = scanned.basket.uid,
+                                tagCode = scanned.basket.tagCode,
+                                status = scanned.basket.status,
+                                quantity = scanned.basket.quantity ?: 0
+                            )
+                        }
+                    )
+                }
+        }
+
+        ConfirmSubmitDialog(
+            title = "確認清除配置",
+            icon = Icons.Default.DeleteSweep,
+            iconTint = MaterialTheme.colorScheme.error,
+            description = "您即將清除以下籃子的配置，清除後：\n• 籃子狀態變為「未配置」\n• 產品、批次、數量將被移除",
+            contextInfo = ConfirmContextInfo(
+                icon = Icons.Default.Warning,
+                label = "操作類型",
+                value = "清除配置（無法撤銷）"
+            ),
+            products = productSummaries,
+            footerText = "⚠️ 此操作無法撤銷，請確認無誤後再提交",
+            confirmText = "確認清除",
+            confirmIcon = Icons.Default.Clear,
+            confirmColor = MaterialTheme.colorScheme.error,
+            isSubmitting = uiState.isLoading,
             onDismiss = { viewModel.dismissConfirmDialog() },
             onConfirm = { viewModel.confirmClear() }
         )
@@ -286,92 +308,4 @@ private fun WarningCard() {
             }
         }
     }
-}
-
-@Composable
-private fun ConfirmClearDialog(
-    items: List<ScannedBasketItem>,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    val baskets = items.map { it.basket }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.error
-            )
-        },
-        title = { Text("確認清除配置") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "共 ${baskets.size} 個籃子",
-                    style = MaterialTheme.typography.titleSmall
-                )
-
-                Divider()
-
-                // 顯示將被清除的籃子信息
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "將被清除的籃子：",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        baskets.take(5).forEach { basket ->
-                            Text(
-                                text = "• ${basket.uid.takeLast(8)} - ${basket.product?.name ?: "未配置"} (${getBasketStatusText(basket.status)})",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (baskets.size > 5) {
-                            Text(
-                                text = "... 還有 ${baskets.size - 5} 個籃子",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
-                }
-
-                Divider()
-
-                Text(
-                    text = "⚠️ 清除後將無法恢復，請確認操作",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
-                )
-            ) {
-                Text("確認清除")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
 }

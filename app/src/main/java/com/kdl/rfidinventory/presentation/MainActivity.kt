@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -26,6 +27,8 @@ import com.kdl.rfidinventory.presentation.ui.theme.RFIDInventoryTheme
 import com.kdl.rfidinventory.util.KeyEventHandler
 import com.kdl.rfidinventory.util.ScreenBrightnessManager
 import com.kdl.rfidinventory.domain.manager.barcode.BarcodeScanManager
+import com.kdl.rfidinventory.domain.manager.rfid.RFIDManager
+import com.kdl.rfidinventory.util.PowerState
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -39,6 +42,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var barcodeScanManager: BarcodeScanManager
+
+    @Inject
+    lateinit var rfidManager: RFIDManager
 
     @Inject
     lateinit var loadingRepository: LoadingRepository
@@ -61,9 +67,15 @@ class MainActivity : ComponentActivity() {
 //        }
 
         // 初始化屏幕亮度管理
-//        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-//        screenBrightnessManager.initialize(this)
-//        screenBrightnessManager.resetTimer()
+        screenBrightnessManager.initialize(this)
+        screenBrightnessManager.resetTimer()
+
+        // 監聽屏幕 dim 狀態，自動暫停/恢復硬體服務
+        lifecycleScope.launch {
+            screenBrightnessManager.powerState.collect { state ->
+                handlePowerStateChange(state)
+            }
+        }
 
         // 啟動時註冊設備
         lifecycleScope.launch {
@@ -130,6 +142,31 @@ class MainActivity : ComponentActivity() {
 //    }
 
     /**
+     * 處理分級電源狀態變化
+     */
+    private fun handlePowerStateChange(state: PowerState) {
+        Timber.d("🔋 Power state changed: $state")
+        when (state) {
+            PowerState.FULL_ACTIVE -> {
+                // 恢復所有硬體
+                barcodeScanManager.resume()
+                rfidManager.resumeHardware()
+            }
+            PowerState.HARDWARE_IDLE -> {
+                // 只暫停 barcode（最常發熱）
+                barcodeScanManager.pause()
+                // RFID 保持但降功率
+                rfidManager.pauseHardware()
+            }
+            PowerState.SCREEN_DIMMED, PowerState.DEEP_SLEEP -> {
+                // 全部暫停
+                barcodeScanManager.pause()
+                rfidManager.pauseHardware()
+            }
+        }
+    }
+
+    /**
      * 註冊設備並連接 WebSocket
      */
     private suspend fun registerDeviceAndConnect() {
@@ -178,49 +215,48 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         screenBrightnessManager.resetTimer()
 
+        // 如果剛從 dim 狀態喚醒，給硬體一點時間重新初始化
+        // 第一次按鍵只用於喚醒，不處理實際邏輯
+        // （這個判斷可選，取決於用戶體驗偏好）
+
         val keyCode = event.keyCode
         Timber.d("🎯 Activity dispatchKeyEvent: keyCode=$keyCode, action=${event.action}")
 
-        if (barcodeScanManager.handleKeyEvent(keyCode, event)) {
-            Timber.d("✅ Key event handled by BarcodeScanManager")
+//        if (barcodeScanManager.handleKeyEvent(keyCode, event)) {
+//            return true
+//        }
+        if (barcodeScanManager.hardwareState.value == BarcodeScanManager.HardwareState.WARMING_UP) {
+            Timber.v("🔥 Hardware warming up, consuming event")
             return true
         }
 
         lifecycleScope.launch {
-            if (keyEventHandler.handleKeyEvent(keyCode, event)) {
-                Timber.d("✅ Key event handled by KeyEventHandler")
-            } else {
-                Timber.v("⏭️ Key event not handled")
-            }
+            keyEventHandler.handleKeyEvent(keyCode, event)
         }
 
         return super.dispatchKeyEvent(event)
     }
 
     // 監聽觸摸事件
-//    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-//        // 用戶觸摸屏幕，重置計時器
-//        if (ev.action == MotionEvent.ACTION_DOWN) {
-//            screenBrightnessManager.resetTimer()
-//        }
-//        return super.dispatchTouchEvent(ev)
-//    }
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.action == MotionEvent.ACTION_DOWN) {
+            screenBrightnessManager.resetTimer()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
 
-//    override fun onResume() {
-//        super.onResume()
-//        hideSystemUI()
-//        // Activity 恢覆時重置計時器
-//        screenBrightnessManager.resetTimer()
-//    }
+    override fun onResume() {
+        super.onResume()
+        screenBrightnessManager.resetTimer()
+    }
 
     override fun onDestroy() {
         super.onDestroy()
-
-//        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-//        screenBrightnessManager.release()
+        screenBrightnessManager.release()
 
         keyEventHandler.reset()
         barcodeScanManager.release()
+        rfidManager.release()
         webSocketManager.cleanup()
         webSocketManager.disconnect()
         Timber.d("🛑 MainActivity destroyed")

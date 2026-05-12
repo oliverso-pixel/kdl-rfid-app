@@ -27,11 +27,11 @@ import javax.inject.Inject
 @HiltViewModel
 class ProductionViewModel @Inject constructor(
     private val scanManager: ScanManager,
+    webSocketManager: WebSocketManager,
+    pendingOperationDao: PendingOperationDao,
+    private val authRepository: AuthRepository,
     private val productionRepository: ProductionRepository,
     private val basketRepository: BasketRepository,
-    private val webSocketManager: WebSocketManager,
-    private val pendingOperationDao: PendingOperationDao,
-    private val authRepository: AuthRepository,
     private val json: Json
 ) : ViewModel() {
 
@@ -44,11 +44,8 @@ class ProductionViewModel @Inject constructor(
         isOnline,
         pendingOperationDao.getPendingCount()
     ) { online, pendingCount ->
-        if (online) {
-            NetworkState.Connected
-        } else {
-            NetworkState.Disconnected(pendingCount)
-        }
+        if (online) NetworkState.Connected
+        else NetworkState.Disconnected(pendingCount)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -60,14 +57,100 @@ class ProductionViewModel @Inject constructor(
     private val validatingUids = mutableSetOf<String>()
 
     init {
-        Timber.d("ProductionViewModel initialized")
+//        Timber.d("ProductionViewModel initialized")
         loadProducts()
         initializeScanManager()
         observeScanResults()
         observeScanErrors()
         observeNetworkState()
+        scanManager.setBarcodeKeepWarm(false)
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun initializeScanManager() {
+        scanManager.initialize(
+            scope = viewModelScope,
+            scanMode = _uiState.map { it.scanMode }.stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                ScanMode.SINGLE
+            ),
+            canStartScan = { _uiState.value.showProductDialog || (_uiState.value.selectedProduct != null && _uiState.value.selectedBatch != null) },
+            scanContextProvider = {
+                if (_uiState.value.showProductDialog) ScanContext.PRODUCT_SEARCH
+                else ScanContext.BASKET_SCAN
+            }
+        )
+    }
+
+    private fun observeScanResults() {
+        viewModelScope.launch {
+            scanManager.scanResults.collect { result ->
+                when (result) {
+                    is ScanResult.BarcodeScanned -> {
+                        when (result.context) {
+                            ScanContext.PRODUCT_SEARCH -> { updateProductSearchQuery(result.barcode) }
+                            else -> handleScannedBarcode(result.barcode)
+                        }
+                    }
+                    is ScanResult.RfidScanned -> handleScannedRfidTag(result.tag)
+                    is ScanResult.ClearListRequested -> clearBaskets()
+                }
+            }
+        }
+    }
+
+    private fun observeScanErrors() {
+        viewModelScope.launch {
+            scanManager.errors.collect { error -> _uiState.update { it.copy(error = error) } }
+        }
+    }
+    private fun observeNetworkState() {
+        viewModelScope.launch {
+            networkState.collect { state ->
+                Timber.d("📡 Production - Network state: $state")
+            }
+        }
+    }
+
+    fun setScanMode(mode: ScanMode) {
+        viewModelScope.launch {
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            }
+            scanManager.changeScanMode(mode)
+            _uiState.update { it.copy(scanMode = mode) }
+
+            scanManager.setBarcodeKeepWarm(mode == ScanMode.SINGLE)
+            Timber.d("🔀 Scan mode changed → $mode, keepBarcodeWarm=${mode == ScanMode.SINGLE}")
+        }
+    }
+
+    private fun handleScannedBarcode(barcode: String) {
+        Timber.d("🔍 Processing barcode: $barcode")
+        validateAndAddBasket(barcode, rssi = 0)
+    }
+
+    private fun handleScannedRfidTag(tag: RFIDTag) {
+        Timber.d("🔍 Processing RFID tag: ${tag.uid}")
+        validateAndAddBasket(tag.uid, rssi = tag.rssi)
+    }
+
+    fun toggleScanFromButton() {
+        viewModelScope.launch {
+            if (_uiState.value.selectedProduct == null || _uiState.value.selectedBatch == null) {
+                _uiState.update { it.copy(error = "請先選擇產品和批次") }
+                return@launch
+            }
+            if (scanManager.scanState.value.isScanning) {
+                scanManager.stopScanning()
+            } else {
+                scanManager.startRfidScan(_uiState.value.scanMode)
+            }
+        }
+    }
+
+    // ==================== 業務邏輯 ====================
     private fun loadProducts() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
@@ -89,108 +172,6 @@ class ProductionViewModel @Inject constructor(
                 .onFailure { error ->
                     _uiState.update { it.copy(error = error.message, isLoading = false) }
                 }
-        }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    private fun initializeScanManager() {
-        scanManager.initialize(
-            scope = viewModelScope,
-            scanMode = _uiState.map { it.scanMode }.stateIn(
-                viewModelScope,
-                SharingStarted.Eagerly,
-                ScanMode.SINGLE
-            ),
-            canStartScan = {
-                _uiState.value.showProductDialog || (_uiState.value.selectedProduct != null && _uiState.value.selectedBatch != null)
-            }
-        )
-    }
-
-    private fun observeScanResults() {
-        viewModelScope.launch {
-            scanManager.scanResults.collect { result ->
-                when (result) {
-                    is ScanResult.BarcodeScanned -> {
-                        when (result.context) {
-                            ScanContext.PRODUCT_SEARCH -> {
-                                updateProductSearchQuery(result.barcode)
-                            }
-//                            ScanContext.BASKET_SCAN -> {
-//                                // 籃子掃描
-//                                handleScannedBarcode(result.barcode)
-//                            }
-                            else -> handleScannedBarcode(result.barcode)
-                        }
-                    }
-                    is ScanResult.RfidScanned -> {
-                        handleScannedRfidTag(result.tag)
-                    }
-                    is ScanResult.ClearListRequested -> {
-                        clearBaskets()
-                    }
-                }
-            }
-        }
-    }
-
-    private fun observeScanErrors() {
-        viewModelScope.launch {
-            scanManager.errors.collect { error ->
-                _uiState.update { it.copy(error = error) }
-            }
-        }
-    }
-
-    private fun observeNetworkState() {
-        viewModelScope.launch {
-            networkState.collect { state ->
-                Timber.d("📡 Production - Network state: $state")
-            }
-        }
-    }
-
-    fun setScanMode(mode: ScanMode) {
-        viewModelScope.launch {
-            if (scanManager.scanState.value.isScanning) {
-                scanManager.stopScanning()
-            }
-            scanManager.changeScanMode(mode)
-            _uiState.update { it.copy(scanMode = mode) }
-        }
-    }
-
-    private fun handleScannedBarcode(barcode: String) {
-        Timber.d("🔍 Processing barcode: $barcode")
-        validateAndAddBasket(barcode, rssi = 0)
-    }
-
-    private fun handleScannedRfidTag(tag: RFIDTag) {
-        Timber.d("🔍 Processing RFID tag: ${tag.uid}")
-        validateAndAddBasket(tag.uid, rssi = tag.rssi)
-    }
-
-    fun clearBaskets() {
-        scanManager.stopScanning()
-        _uiState.update {
-            it.copy(
-                scannedBaskets = emptyList(),
-                totalScanCount = 0
-            )
-        }
-    }
-
-    fun toggleScanFromButton() {
-        viewModelScope.launch {
-            if (_uiState.value.selectedProduct == null || _uiState.value.selectedBatch == null) {
-                _uiState.update { it.copy(error = "請先選擇產品和批次") }
-                return@launch
-            }
-            if (scanManager.scanState.value.isScanning) {
-                scanManager.stopScanning()
-            } else {
-                scanManager.startRfidScan(_uiState.value.scanMode)
-            }
         }
     }
 
@@ -232,8 +213,11 @@ class ProductionViewModel @Inject constructor(
             )
         }
 
-        // 停止產品搜索掃描
         scanManager.stopScanning()
+
+        if (_uiState.value.scanMode != ScanMode.SINGLE) {
+            scanManager.setBarcodeKeepWarm(false)
+        }
 
         loadBatchesForProduct(product.itemcode)
     }
@@ -270,13 +254,11 @@ class ProductionViewModel @Inject constructor(
      *  驗證並添加籃子
      */
     private fun validateAndAddBasket(uid: String, rssi: Int) {
-        // 防止重複驗證
         if (validatingUids.contains(uid)) {
-            Timber.d("⏭️ Basket $uid is already being validated, skipping...")
+//            Timber.d("⏭️ Basket $uid is already being validated, skipping...")
             return
         }
 
-        // 檢查是否已經在列表中
         val existingBasketIndex = _uiState.value.scannedBaskets.indexOfFirst { it.uid == uid }
         if (existingBasketIndex != -1) {
             updateExistingBasket(existingBasketIndex, uid, rssi)
@@ -290,17 +272,15 @@ class ProductionViewModel @Inject constructor(
             basketRepository.fetchBasket(uid, isOnline.value)
                 .onSuccess { basket ->
                     when (basket.status) {
-                        BasketStatus.UNASSIGNED -> {
+                        /**
+                         * TODO: Basket Status if full version update not allow shipped
+                         */
+                        BasketStatus.UNASSIGNED, BasketStatus.SHIPPED -> {
                             Timber.d("✅ Basket valid for production: $uid")
 
                             val selectedProduct = _uiState.value.selectedProduct
                             if (selectedProduct != null) {
-                                // 比對 basket.type 與 product.btype
-                                // 注意：你需要在 Basket 中添加 type 字段
-                                // 如果 API 回傳的 basket 沒有 type，可能需要從 BasketDetailResponse 中補上
-
-                                // 暫時假設從 basket.bid 欄位判斷類型
-                                val basketType = basket.type ?: 0  // 需要在 Basket 模型中添加 type 欄位
+                                val basketType = basket.type ?: 0
 
                                 if (basketType != selectedProduct.btype) {
                                     _uiState.update {
@@ -311,7 +291,6 @@ class ProductionViewModel @Inject constructor(
                                                     "請使用正確的籃子款式"
                                         )
                                     }
-//                                    return@onSuccess
                                 } else {
                                     addNewBasket(uid, rssi, basket)
                                 }
@@ -367,7 +346,7 @@ class ProductionViewModel @Inject constructor(
                     set(index, updatedBasket)
                 },
                 totalScanCount = state.totalScanCount + 1,
-                successMessage = "籃子 ${uid.takeLast(8)} 重複掃描 (第 ${updatedBasket.scanCount} 次)"
+//                successMessage = "籃子 ${uid.takeLast(8)} 重複掃描 (第 ${updatedBasket.scanCount} 次)"
             )
         }
     }
@@ -397,7 +376,6 @@ class ProductionViewModel @Inject constructor(
             )
         }
 
-        // 單次掃描模式：掃描成功後自動停止
         if (_uiState.value.scanMode == ScanMode.SINGLE) {
             scanManager.stopScanning()
         }
@@ -475,9 +453,6 @@ class ProductionViewModel @Inject constructor(
                 imageUrl = product.imageUrl
             )
             val productJson = json.encodeToString(simplifiedProduct)
-
-//            val productJson = json.encodeToString(product)
-//            val batchJson = json.encodeToString(batch)
 
             val commonData = CommonDataDto(
                 product = productJson,
@@ -624,18 +599,43 @@ class ProductionViewModel @Inject constructor(
     }
 
     fun showProductDialog() {
-        _uiState.update { it.copy(showProductDialog = true, productSearchQuery = "") }
+        _uiState.update {
+            it.copy(
+                showProductDialog = true,
+                productSearchQuery = "",
+                isLoading = true
+            )
+        }
 
-        // 延遲啟動產品搜索掃描
+        scanManager.setBarcodeKeepWarm(true)
+
         viewModelScope.launch {
-            delay(300)
-            if (_uiState.value.showProductDialog) {
-                scanManager.startBarcodeScan(ScanContext.PRODUCT_SEARCH)
-            }
+            productionRepository.getProductionOrders()
+                .onSuccess { orders ->
+                    val products = orders.map { order ->
+                        Product(
+                            itemcode = order.itemcode,
+                            barcodeId = order.barcodeId,
+                            qrcodeId = order.qrcodeId,
+                            name = order.name,
+                            maxBasketCapacity = order.maxBasketCapacity,
+                            imageUrl = order.imageUrl,
+                            btype = order.btype
+                        )
+                    }
+                    _uiState.update { it.copy(products = products, isLoading = false) }
+                    Timber.d("🔄 Product list refreshed: ${products.size} items")
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(error = "載入產品失敗: ${error.message}", isLoading = false)
+                    }
+                }
         }
     }
 
     fun dismissDialog() {
+        val wasProductDialog = _uiState.value.showProductDialog
         scanManager.stopScanning()
         _uiState.update {
             it.copy(
@@ -644,6 +644,9 @@ class ProductionViewModel @Inject constructor(
                 showConfirmDialog = false,
                 productSearchQuery = ""
             )
+        }
+        if (wasProductDialog && _uiState.value.scanMode != ScanMode.SINGLE) {
+            scanManager.setBarcodeKeepWarm(false)
         }
     }
 
@@ -667,16 +670,22 @@ class ProductionViewModel @Inject constructor(
         }
     }
 
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
+    fun clearBaskets() {
+        scanManager.stopScanning()
+        _uiState.update {
+            it.copy(
+                scannedBaskets = emptyList(),
+                totalScanCount = 0
+            )
+        }
     }
 
-    fun clearSuccess() {
-        _uiState.update { it.copy(successMessage = null) }
-    }
+    fun clearError() { _uiState.update { it.copy(error = null) } }
+    fun clearSuccess() { _uiState.update { it.copy(successMessage = null) } }
 
     override fun onCleared() {
         super.onCleared()
+        scanManager.setBarcodeKeepWarm(false)
         scanManager.cleanup()
     }
 }
@@ -684,7 +693,7 @@ class ProductionViewModel @Inject constructor(
 data class ProductionUiState(
     val isLoading: Boolean = false,
     val isValidating: Boolean = false,
-    val scanMode: ScanMode = ScanMode.SINGLE,
+    val scanMode: ScanMode = ScanMode.CONTINUOUS,
     val products: List<Product> = emptyList(),
     val batches: List<Batch> = emptyList(),
     val productSearchQuery: String = "",
