@@ -21,8 +21,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.presentation.ui.components.*
-import com.kdl.rfidinventory.util.ScanMode
-import timber.log.Timber
+import com.kdl.rfidinventory.domain.model.ScanMode
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -788,7 +787,7 @@ private fun VerifyScanningStep(
     statistics: VerifyStatistics,
     scanMode: ScanMode,
     isScanning: Boolean,
-    scanType: com.kdl.rfidinventory.util.ScanType,
+    scanType: com.kdl.rfidinventory.domain.model.ScanType,
     isValidating: Boolean,
     isSubmitted: Boolean,
     canScan: Boolean,

@@ -7,8 +7,8 @@ import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.repository.SamplingRepository
 import com.kdl.rfidinventory.domain.manager.rfid.RFIDManager
 import com.kdl.rfidinventory.domain.manager.rfid.RFIDTag
-import com.kdl.rfidinventory.util.NetworkState
-import com.kdl.rfidinventory.util.ScanMode
+import com.kdl.rfidinventory.data.remote.model.NetworkState
+import com.kdl.rfidinventory.domain.model.ScanMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -60,34 +60,34 @@ class SamplingViewModel @Inject constructor(
             }
 
             // 從資料庫查詢籃子信息
-            samplingRepository.getBasketByUid(tag.uid)
-                .onSuccess { basket ->
-                    // 檢查籃子狀態 - 只能抽樣在倉庫中的籃子
-                    if (basket.status != BasketStatus.IN_STOCK && basket.status != BasketStatus.RECEIVED) {
-                        _uiState.update {
-                            it.copy(error = "籃子狀態錯誤，只能抽樣在庫籃子")
-                        }
-                        return@onSuccess
-                    }
-
-                    scannedBaskets[tag.uid] = basket
-                    _uiState.update {
-                        it.copy(
-                            scannedBaskets = scannedBaskets.values.toList(),
-                            totalQuantity = scannedBaskets.values.sumOf { b -> b.quantity }
-                        )
-                    }
-
-                    // 單次掃描模式下停止
-                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
-                        stopScanning()
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(error = "查詢失敗: ${error.message}")
-                    }
-                }
+//            samplingRepository.getBasketByUid(tag.uid)
+//                .onSuccess { basket ->
+//                    // 檢查籃子狀態 - 只能抽樣在倉庫中的籃子
+//                    if (basket.status != BasketStatus.IN_STOCK && basket.status != BasketStatus.RECEIVED) {
+//                        _uiState.update {
+//                            it.copy(error = "籃子狀態錯誤，只能抽樣在庫籃子")
+//                        }
+//                        return@onSuccess
+//                    }
+//
+//                    scannedBaskets[tag.uid] = basket
+//                    _uiState.update {
+//                        it.copy(
+//                            scannedBaskets = scannedBaskets.values.toList(),
+//                            totalQuantity = scannedBaskets.values.sumOf { b -> b.quantity }
+//                        )
+//                    }
+//
+//                    // 單次掃描模式下停止
+//                    if (_uiState.value.scanMode == ScanMode.SINGLE) {
+//                        stopScanning()
+//                    }
+//                }
+//                .onFailure { error ->
+//                    _uiState.update {
+//                        it.copy(error = "查詢失敗: ${error.message}")
+//                    }
+//                }
         }
     }
 
@@ -121,29 +121,29 @@ class SamplingViewModel @Inject constructor(
             val isOnline = _networkState.value is NetworkState.Connected
             val uids = scannedBaskets.keys.toList()
 
-            samplingRepository.markForSampling(
-                uids = uids,
-                sampleQuantity = sampleQuantity,
-                remarks = remarks,
-                isOnline = isOnline
-            ).onSuccess {
-                scannedBaskets.clear()
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        scannedBaskets = emptyList(),
-                        totalQuantity = 0,
-                        successMessage = "抽樣標記成功，共 ${uids.size} 個籃子，抽樣數量 $sampleQuantity"
-                    )
-                }
-            }.onFailure { error ->
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        error = "抽樣失敗: ${error.message}"
-                    )
-                }
-            }
+//            samplingRepository.markForSampling(
+//                uids = uids,
+//                sampleQuantity = sampleQuantity,
+//                remarks = remarks,
+//                isOnline = isOnline
+//            ).onSuccess {
+//                scannedBaskets.clear()
+//                _uiState.update {
+//                    it.copy(
+//                        isLoading = false,
+//                        scannedBaskets = emptyList(),
+//                        totalQuantity = 0,
+//                        successMessage = "抽樣標記成功，共 ${uids.size} 個籃子，抽樣數量 $sampleQuantity"
+//                    )
+//                }
+//            }.onFailure { error ->
+//                _uiState.update {
+//                    it.copy(
+//                        isLoading = false,
+//                        error = "抽樣失敗: ${error.message}"
+//                    )
+//                }
+//            }
         }
     }
 

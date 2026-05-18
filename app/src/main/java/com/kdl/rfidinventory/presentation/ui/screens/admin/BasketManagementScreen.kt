@@ -21,9 +21,9 @@ import com.kdl.rfidinventory.presentation.ui.components.BasketCard
 import com.kdl.rfidinventory.presentation.ui.components.BasketCardMode
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
-import com.kdl.rfidinventory.util.NetworkState
-import com.kdl.rfidinventory.util.ScanMode
-import com.kdl.rfidinventory.util.ScanModeAvailability
+import com.kdl.rfidinventory.data.remote.model.NetworkState
+import com.kdl.rfidinventory.domain.model.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanModeAvailability
 import timber.log.Timber
 
 @RequiresApi(Build.VERSION_CODES.O)

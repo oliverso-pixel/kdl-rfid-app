@@ -6,18 +6,22 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.device.DeviceInfoProvider
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
+import com.kdl.rfidinventory.data.local.datastore.SettingsDataStore
 import com.kdl.rfidinventory.data.local.entity.BasketEntity
-import com.kdl.rfidinventory.data.local.preferences.PreferencesManager
 import com.kdl.rfidinventory.data.model.Basket
 import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
+import com.kdl.rfidinventory.data.remote.model.NetworkState
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.data.repository.AdminRepository
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
+import com.kdl.rfidinventory.domain.manager.ScanManager
+import com.kdl.rfidinventory.domain.manager.ScanResult
 import com.kdl.rfidinventory.util.*
 import com.kdl.rfidinventory.domain.manager.rfid.RFIDManager
+import com.kdl.rfidinventory.domain.model.ScanMode
 import com.ubx.usdk.bean.RfidParameter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -42,7 +46,7 @@ class AdminViewModel @Inject constructor(
     private val pendingOperationDao: PendingOperationDao,
     private val webSocketManager: WebSocketManager,
     private val rfidManager: RFIDManager,
-    private val preferencesManager: PreferencesManager,
+    private val settingsDataStore: SettingsDataStore,  // 🔧 改這裡
     private val deviceInfoProvider: DeviceInfoProvider
 ) : ViewModel() {
 
@@ -68,14 +72,12 @@ class AdminViewModel @Inject constructor(
 
     val scanState = scanManager.scanState
 
-    // WebSocket 狀態
     val webSocketState: StateFlow<WebSocketState> = webSocketManager.connectionState
     val webSocketEnabled: StateFlow<Boolean> = webSocketManager.enableWebSocket
     val webSocketUrl: StateFlow<String> = webSocketManager.websocketUrl
 
     private val processingUids = mutableSetOf<String>()
 
-    // 查詢模式：當前查詢到的籃子
     private val _queriedBasket = MutableStateFlow<Basket?>(null)
     val queriedBasket = _queriedBasket.asStateFlow()
 
@@ -86,10 +88,47 @@ class AdminViewModel @Inject constructor(
         loadDeviceName()
         observePendingOperations()
         observeLocalBaskets()
+        observeSettingsChanges()
 
         initializeScanManager()
         observeScanResults()
         observeScanErrors()
+    }
+
+    /**
+     * 🆕 訂閱 DataStore flow → 自動同步到 uiState.settings
+     */
+    private fun observeSettingsChanges() {
+        viewModelScope.launch {
+            combine(
+                webSocketManager.websocketUrl,
+                webSocketManager.enableWebSocket,
+                settingsDataStore.maxBasketsPerScan,
+                settingsDataStore.scanTimeout,
+                settingsDataStore.autoSync,
+                settingsDataStore.serverUrl
+            ) { values ->
+                @Suppress("UNCHECKED_CAST")
+                AppSettings(
+                    websocketUrl = values[0] as String,
+                    websocketEnabled = values[1] as Boolean,
+                    maxBasketsPerScan = values[2] as Int,
+                    scanTimeoutSeconds = values[3] as Int,
+                    autoSync = values[4] as Boolean,
+                    serverUrl = values[5] as String
+                )
+            }.collect { newSettings ->
+                _uiState.update { current ->
+                    // 保留從 adminRepository 取得的 appVersion / databaseVersion
+                    current.copy(
+                        settings = newSettings.copy(
+                            appVersion = current.settings.appVersion,
+                            databaseVersion = current.settings.databaseVersion
+                        )
+                    )
+                }
+            }
+        }
     }
 
     private fun loadSettings() {
@@ -98,7 +137,8 @@ class AdminViewModel @Inject constructor(
 
             adminRepository.getSettings()
                 .onSuccess { settings ->
-                    val maxPerScan = preferencesManager.getMaxBasketsPerScan()
+                    // 🔧 suspend 讀取
+                    val maxPerScan = settingsDataStore.getMaxBasketsPerScan()
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -112,29 +152,21 @@ class AdminViewModel @Inject constructor(
                 }
                 .onFailure { error ->
                     _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = error.message
-                        )
+                        it.copy(isLoading = false, error = error.message)
                     }
                 }
         }
     }
 
-    // 新增設定方法
     fun updateMaxBasketsPerScan(value: Int) {
         viewModelScope.launch {
-            preferencesManager.setMaxBasketsPerScan(value)
+            settingsDataStore.setMaxBasketsPerScan(value)   // 🔧 suspend
             _uiState.update {
-                it.copy(
-                    settings = it.settings.copy(maxBasketsPerScan = value),
-                    successMessage = "每次掃描上限已更新為 $value"
-                )
+                it.copy(successMessage = "每次掃描上限已更新為 $value")
             }
         }
     }
 
-    // Dialog 控制
     fun showMaxBasketsPerScanDialog() {
         _uiState.update { it.copy(showMaxBasketsDialog = true) }
     }
@@ -142,19 +174,11 @@ class AdminViewModel @Inject constructor(
         _uiState.update { it.copy(showMaxBasketsDialog = false) }
     }
 
-    /**
-     * 加載 RFID 模塊信息
-     */
     private fun loadRFIDInfo() {
         viewModelScope.launch {
             try {
-                // 獲取固件版本
                 val firmwareVersion = rfidManager.getFirmwareVersion()
-
-                // 獲取當前功率
                 val currentPower = rfidManager.getPower()
-
-                // 檢查連接狀態
                 val isConnected = rfidManager.isConnected()
 
                 _uiState.update {
@@ -166,20 +190,14 @@ class AdminViewModel @Inject constructor(
                         )
                     )
                 }
-
                 Timber.d("✅ RFID Info loaded: version=$firmwareVersion, power=$currentPower, connected=$isConnected")
             } catch (e: Exception) {
                 Timber.e(e, "❌ Failed to load RFID info")
-                _uiState.update {
-                    it.copy(error = "獲取 RFID 信息失敗: ${e.message}")
-                }
+                _uiState.update { it.copy(error = "獲取 RFID 信息失敗: ${e.message}") }
             }
         }
     }
 
-    /**
-     * 設置功率
-     */
     fun setPower(power: Int) {
         viewModelScope.launch {
             _uiState.update { it.copy(isSettingPower = true) }
@@ -196,10 +214,7 @@ class AdminViewModel @Inject constructor(
                 }
                 .onFailure { error ->
                     _uiState.update {
-                        it.copy(
-                            isSettingPower = false,
-                            error = "功率設置失败: ${error.message}"
-                        )
+                        it.copy(isSettingPower = false, error = "功率設置失败: ${error.message}")
                     }
                 }
         }
@@ -214,69 +229,47 @@ class AdminViewModel @Inject constructor(
 
     fun setSession(session: Int) {
         viewModelScope.launch {
-            val param = RfidParameter().apply {
-                Session = session
-            }
+            val param = RfidParameter().apply { Session = session }
             // 設置參數...
         }
     }
 
     fun setQValue(qValue: Int) {
         viewModelScope.launch {
-            val param = RfidParameter().apply {
-                QValue = qValue
-            }
+            val param = RfidParameter().apply { QValue = qValue }
             // 設置參數...
         }
     }
 
-    fun refreshRFIDInfo() {
-        loadRFIDInfo()
-    }
+    fun refreshRFIDInfo() { loadRFIDInfo() }
 
-    fun showPowerDialog() {
-        _uiState.update { it.copy(showPowerDialog = true) }
-    }
-
-    fun dismissPowerDialog() {
-        _uiState.update { it.copy(showPowerDialog = false) }
-    }
-
-    /**
-     * End of RFID
-     */
+    fun showPowerDialog() { _uiState.update { it.copy(showPowerDialog = true) } }
+    fun dismissPowerDialog() { _uiState.update { it.copy(showPowerDialog = false) } }
 
     private fun loadDeviceName() {
         val name = deviceInfoProvider.getDeviceName()
         _uiState.update { it.copy(deviceName = name) }
     }
 
-    fun showDeviceNameDialog() {
-        _uiState.update { it.copy(showDeviceNameDialog = true) }
-    }
-
-    fun dismissDeviceNameDialog() {
-        _uiState.update { it.copy(showDeviceNameDialog = false) }
-    }
+    fun showDeviceNameDialog() { _uiState.update { it.copy(showDeviceNameDialog = true) } }
+    fun dismissDeviceNameDialog() { _uiState.update { it.copy(showDeviceNameDialog = false) } }
 
     fun updateDeviceName(name: String) {
         viewModelScope.launch {
             if (name.isNotBlank()) {
-                preferencesManager.setCustomDeviceName(name)
+                settingsDataStore.setCustomDeviceName(name)  // 🔧 suspend
                 _uiState.update {
-                    it.copy(
-                        deviceName = name,
-                        successMessage = "設備名稱已更新"
-                    )
+                    it.copy(deviceName = name, successMessage = "設備名稱已更新")
                 }
-                // 如果需要，這裡可以觸發重新註冊設備 API
             }
         }
     }
 
     private fun observePendingOperations() {
         viewModelScope.launch {
-            pendingOperationDao.getPendingCount().collect { count -> _uiState.update { it.copy(pendingOperationsCount = count) } }
+            pendingOperationDao.getPendingCount().collect { count ->
+                _uiState.update { it.copy(pendingOperationsCount = count) }
+            }
         }
     }
 
@@ -287,7 +280,6 @@ class AdminViewModel @Inject constructor(
                 _searchQuery
             ) { baskets, query ->
                 Timber.d("🔄 Baskets updated from database: ${baskets.size} total")
-
                 if (query.isBlank()) {
                     baskets
                 } else {
@@ -312,40 +304,26 @@ class AdminViewModel @Inject constructor(
             scanMode = _scanMode,
             canStartScan = {
                 when (_basketManagementMode.value) {
-                    BasketManagementMode.REGISTER -> true // 登記模式允許掃描
-                    BasketManagementMode.QUERY -> true    // 查詢模式允許掃描
-                    BasketManagementMode.LOCAL -> false   // 本地模式禁止掃描
+                    BasketManagementMode.REGISTER -> true
+                    BasketManagementMode.QUERY -> true
+                    BasketManagementMode.LOCAL -> false
                 }
             }
         )
-
         Timber.d("✅ ScanManager initialized (ViewModel instance: ${this.hashCode()})")
     }
 
     private fun observeScanResults() {
         viewModelScope.launch {
             scanManager.scanResults.collect { result ->
-                // ✅ 每次收到結果時，立即讀取最新模式（不依賴 combine）
                 val currentMode = _basketManagementMode.value
-
-                Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                Timber.d("📦 Scan Result Received")
-                Timber.d("  ├─ Result Type: ${result::class.simpleName}")
-                Timber.d("  ├─ Current Mode from StateFlow: $currentMode")
-                Timber.d("  └─ Timestamp: ${System.currentTimeMillis()}")
-                Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                Timber.d("📦 Scan Result: ${result::class.simpleName}, Mode: $currentMode")
 
                 when (result) {
-                    is ScanResult.BarcodeScanned -> {
-                        handleScannedBarcode(result.barcode, currentMode)
-                    }
-                    is ScanResult.RfidScanned -> {
-                        handleScannedRfidTag(result.tag.uid, currentMode)
-                    }
+                    is ScanResult.BarcodeScanned -> handleScannedBarcode(result.barcode, currentMode)
+                    is ScanResult.RfidScanned -> handleScannedRfidTag(result.tag.uid, currentMode)
                     is ScanResult.ClearListRequested -> {
-                        if (currentMode == BasketManagementMode.REGISTER) {
-                            clearScannedUids()
-                        }
+                        if (currentMode == BasketManagementMode.REGISTER) clearScannedUids()
                     }
                 }
             }
@@ -366,66 +344,25 @@ class AdminViewModel @Inject constructor(
                 scanManager.stopScanning()
                 delay(100)
             }
-
             _scanMode.value = mode
             scanManager.changeScanMode(mode)
         }
     }
 
-    /**
-     * 處理條碼掃描
-     */
     private fun handleScannedBarcode(barcode: String, mode: BasketManagementMode) {
-        Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        Timber.d("🔍 handleScannedBarcode START")
-        Timber.d("  ├─ Barcode: $barcode")
-        Timber.d("  ├─ Mode Parameter: $mode")
-        Timber.d("  └─ StateFlow Mode: ${_basketManagementMode.value}")
-
         when (mode) {
-            BasketManagementMode.REGISTER -> {
-                Timber.run { d("📝 Executing: Register Mode -> addToScannedList") }
-                addToScannedList(barcode)
-            }
-            BasketManagementMode.QUERY -> {
-                Timber.d("🔍 Executing: Query Mode -> fetchBasketDetail")
-                fetchBasketDetail(barcode)
-            }
-            BasketManagementMode.LOCAL -> {
-                Timber.d("⚠️ Local mode: Ignoring scan")
-            }
+            BasketManagementMode.REGISTER -> addToScannedList(barcode)
+            BasketManagementMode.QUERY -> fetchBasketDetail(barcode)
+            BasketManagementMode.LOCAL -> Timber.d("⚠️ Local mode: Ignoring scan")
         }
-
-        Timber.d("🔍 handleScannedBarcode END")
-        Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
-    /**
-     * 處理 RFID 掃描
-     */
     private fun handleScannedRfidTag(uid: String, mode: BasketManagementMode) {
-        Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        Timber.d("🔍 handleScannedRfidTag START")
-        Timber.d("  ├─ UID: $uid")
-        Timber.d("  ├─ Mode Parameter: $mode")
-        Timber.d("  └─ StateFlow Mode: ${_basketManagementMode.value}")
-
         when (mode) {
-            BasketManagementMode.REGISTER -> {
-                Timber.d("📝 Executing: Register Mode -> addToScannedList")
-                addToScannedList(uid)
-            }
-            BasketManagementMode.QUERY -> {
-                Timber.d("🔍 Executing: Query Mode -> fetchBasketDetail")
-                fetchBasketDetail(uid)
-            }
-            BasketManagementMode.LOCAL -> {
-                Timber.d("⚠️ Local mode: Ignoring scan")
-            }
+            BasketManagementMode.REGISTER -> addToScannedList(uid)
+            BasketManagementMode.QUERY -> fetchBasketDetail(uid)
+            BasketManagementMode.LOCAL -> Timber.d("⚠️ Local mode: Ignoring scan")
         }
-
-        Timber.d("🔍 handleScannedRfidTag END")
-        Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
     fun toggleScan() {
@@ -433,14 +370,9 @@ class AdminViewModel @Inject constructor(
             if (scanManager.scanState.value.isScanning) {
                 scanManager.stopScanning()
             } else {
-                // 根據模式決定掃描方式
                 when (_basketManagementMode.value) {
-                    BasketManagementMode.REGISTER -> {
-                        // 登記模式：使用當前設定的掃描模式
-                        scanManager.startRfidScan(_scanMode.value)
-                    }
+                    BasketManagementMode.REGISTER -> scanManager.startRfidScan(_scanMode.value)
                     BasketManagementMode.QUERY -> {
-                        // 查詢模式：強制使用 SINGLE 模式
                         if (_scanMode.value != ScanMode.SINGLE) {
                             setScanMode(ScanMode.SINGLE)
                             delay(50)
@@ -448,7 +380,6 @@ class AdminViewModel @Inject constructor(
                         scanManager.startRfidScan(ScanMode.SINGLE)
                     }
                     BasketManagementMode.LOCAL -> {
-                        // 本地模式：不允許掃描
                         _uiState.update { it.copy(error = "本地管理模式不支援掃描") }
                     }
                 }
@@ -456,43 +387,25 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    /**
-     * [登記模式] 加入暫存列表
-     */
     private fun addToScannedList(uid: String) {
-        Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        Timber.d("📝 [addToScannedList] START")
-        Timber.d("  ├─ UID: $uid")
-        Timber.d("  ├─ Current List Size: ${_uiState.value.scannedUids.size}")
-
         _uiState.update { state ->
             if (state.scannedUids.contains(uid)) {
-                Timber.d("⚠️ UID already exists")
-                state.copy(
-                    successMessage = "⚠️ UID 已在列表中: ${uid.takeLast(8)}"
-                )
+                state.copy(successMessage = "⚠️ UID 已在列表中: ${uid.takeLast(8)}")
             } else {
                 val newList = state.scannedUids + uid
-                Timber.d("📦 Updating list: ${state.scannedUids.size} -> ${newList.size}")
-                Timber.d("✅ List updated to size: ${newList.size}")
-
                 state.copy(
-                    scannedUids = newList,  // ✅ 創建新 List
+                    scannedUids = newList,
                     successMessage = "✅ 已加入: ${uid.takeLast(8)} (共 ${newList.size} 個)"
                 )
             }
         }
-
         if (_scanMode.value == ScanMode.SINGLE) {
             scanManager.stopScanning()
         }
-
-        Timber.d("📝 [addToScannedList] END")
-        Timber.d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
     fun submitRegistration() {
-        val uids = _uiState.value.scannedUids  // ✅ 直接從 uiState 讀取
+        val uids = _uiState.value.scannedUids
         if (uids.isEmpty()) {
             _uiState.update { it.copy(error = "請先掃描至少一個籃子") }
             return
@@ -511,34 +424,22 @@ class AdminViewModel @Inject constructor(
                     "✅ 登記完成: 成功 ${result.successCount} / 總數 ${result.totalCount}"
                 }
                 _uiState.update {
-                    it.copy(
-                        isRegistering = false,
-                        successMessage = msg,
-                        scannedUids = emptyList()  // ✅ 成功後清空
-                    )
+                    it.copy(isRegistering = false, successMessage = msg, scannedUids = emptyList())
                 }
             }.onFailure { e ->
                 _uiState.update {
-                    it.copy(
-                        isRegistering = false,
-                        error = "提交失敗: ${e.message}"
-                    )
+                    it.copy(isRegistering = false, error = "提交失敗: ${e.message}")
                 }
             }
         }
     }
 
-    // [登記] 清除暫存
     fun clearScannedUids() {
         _uiState.update {
-            it.copy(
-                scannedUids = emptyList(),
-                successMessage = "已清空暫存列表"
-            )
+            it.copy(scannedUids = emptyList(), successMessage = "已清空暫存列表")
         }
     }
 
-    // [登記] 移除單個
     fun removeScannedUid(uid: String) {
         _uiState.update { state ->
             state.copy(
@@ -548,50 +449,29 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    // [查詢] 獲取詳情
     fun fetchBasketDetail(uid: String) {
-        Timber.d("🔍 fetchBasketDetail called: $uid")
-
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            Timber.d("🔄 Loading state set to true")
 
             basketRepository.fetchBasket(
                 uid = uid,
                 isOnline = _networkState.value is NetworkState.Connected
             ).onSuccess { basket ->
-                Timber.d("✅ Basket fetched successfully: ${basket.uid}")
                 _queriedBasket.value = basket
                 _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        successMessage = "✅ 查詢成功: ${uid.takeLast(8)}"
-                    )
+                    it.copy(isLoading = false, successMessage = "✅ 查詢成功: ${uid.takeLast(8)}")
                 }
-
-                if (_scanMode.value == ScanMode.SINGLE) {
-                    Timber.d("🛑 Single mode: stopping scan after query")
-                    scanManager.stopScanning()
-                }
+                if (_scanMode.value == ScanMode.SINGLE) scanManager.stopScanning()
             }.onFailure { error ->
-                Timber.e(error, "❌ Failed to fetch basket: $uid")
                 _queriedBasket.value = null
                 _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        error = "查詢失敗: ${error.message}"
-                    )
+                    it.copy(isLoading = false, error = "查詢失敗: ${error.message}")
                 }
-
-                if (_scanMode.value == ScanMode.SINGLE) {
-                    Timber.d("🛑 Single mode: stopping scan after error")
-                    scanManager.stopScanning()
-                }
+                if (_scanMode.value == ScanMode.SINGLE) scanManager.stopScanning()
             }
         }
     }
 
-    // [查詢] 更新籃子
     fun updateBasketInfo(
         basket: Basket,
         newStatus: String?,
@@ -601,6 +481,7 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
+            // 🔧 suspend 呼叫
             val currentUser = authRepository.getCurrentUser()?.username ?: "admin"
 
             val itemDto = BasketUpdateItemDto(
@@ -627,43 +508,23 @@ class AdminViewModel @Inject constructor(
 
     fun setBasketManagementMode(mode: BasketManagementMode) {
         viewModelScope.launch {
-            Timber.d("📋 setBasketManagementMode called: $mode (current: ${_basketManagementMode.value})")
-
             if (scanManager.scanState.value.isScanning) {
-                Timber.d("🛑 Stopping scan before mode change")
                 scanManager.stopScanning()
                 delay(200)
             }
 
             _basketManagementMode.value = mode
-            Timber.d("✅ Mode updated to: ${_basketManagementMode.value}")
 
             _uiState.update {
-                it.copy(
-                    scannedUids = emptyList(),
-                    error = null,
-                    successMessage = null
-                )
+                it.copy(scannedUids = emptyList(), error = null, successMessage = null)
             }
             _queriedBasket.value = null
-            Timber.d("🧹 Cleared temporary data")
 
             when (mode) {
-                BasketManagementMode.REGISTER -> {
-                    Timber.d("🔄 Register mode: setting scan mode to CONTINUOUS")
-                    setScanMode(ScanMode.CONTINUOUS)
-                }
-                BasketManagementMode.QUERY -> {
-                    Timber.d("🔄 Query mode: setting scan mode to SINGLE")
-                    setScanMode(ScanMode.SINGLE)
-                }
-                BasketManagementMode.LOCAL -> {
-                    Timber.d("🔄 Local mode: setting scan mode to SINGLE (no scanning)")
-                    setScanMode(ScanMode.SINGLE)
-                }
+                BasketManagementMode.REGISTER -> setScanMode(ScanMode.CONTINUOUS)
+                BasketManagementMode.QUERY -> setScanMode(ScanMode.SINGLE)
+                BasketManagementMode.LOCAL -> setScanMode(ScanMode.SINGLE)
             }
-
-            Timber.d("✅ Mode change complete: ${_basketManagementMode.value}")
         }
     }
 
@@ -674,16 +535,8 @@ class AdminViewModel @Inject constructor(
     fun deleteBasket(uid: String) {
         viewModelScope.launch {
             adminRepository.deleteLocalBasket(uid)
-                .onSuccess {
-                    _uiState.update {
-                        it.copy(successMessage = "已刪除籃子: $uid")
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(error = "刪除失敗: ${error.message}")
-                    }
-                }
+                .onSuccess { _uiState.update { it.copy(successMessage = "已刪除籃子: $uid") } }
+                .onFailure { error -> _uiState.update { it.copy(error = "刪除失敗: ${error.message}") } }
         }
     }
 
@@ -691,20 +544,15 @@ class AdminViewModel @Inject constructor(
         viewModelScope.launch {
             var successCount = 0
             var failCount = 0
-
             uids.forEach { uid ->
                 adminRepository.deleteLocalBasket(uid)
                     .onSuccess { successCount++ }
                     .onFailure { failCount++ }
             }
-
             _uiState.update {
                 it.copy(
-                    successMessage = if (failCount == 0) {
-                        "已刪除 $successCount 個籃子"
-                    } else {
-                        "刪除完成：成功 $successCount 個，失敗 $failCount 個"
-                    }
+                    successMessage = if (failCount == 0) "已刪除 $successCount 個籃子"
+                    else "刪除完成：成功 $successCount 個，失敗 $failCount 個"
                 )
             }
         }
@@ -713,22 +561,15 @@ class AdminViewModel @Inject constructor(
     fun syncPendingOperations() {
         viewModelScope.launch {
             _uiState.update { it.copy(isSyncing = true) }
-
             adminRepository.syncPendingOperations()
                 .onSuccess { syncedCount ->
                     _uiState.update {
-                        it.copy(
-                            isSyncing = false,
-                            successMessage = "同步成功，共 $syncedCount 筆記錄"
-                        )
+                        it.copy(isSyncing = false, successMessage = "同步成功，共 $syncedCount 筆記錄")
                     }
                 }
                 .onFailure { error ->
                     _uiState.update {
-                        it.copy(
-                            isSyncing = false,
-                            error = "同步失敗: ${error.message}"
-                        )
+                        it.copy(isSyncing = false, error = "同步失敗: ${error.message}")
                     }
                 }
         }
@@ -736,29 +577,13 @@ class AdminViewModel @Inject constructor(
 
     fun clearAllData() {
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isLoading = true,
-                    showClearDataDialog = false
-                )
-            }
-
+            _uiState.update { it.copy(isLoading = true, showClearDataDialog = false) }
             adminRepository.clearAllData()
                 .onSuccess {
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            successMessage = "所有資料已清除"
-                        )
-                    }
+                    _uiState.update { it.copy(isLoading = false, successMessage = "所有資料已清除") }
                 }
                 .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "清除失敗: ${error.message}"
-                        )
-                    }
+                    _uiState.update { it.copy(isLoading = false, error = "清除失敗: ${error.message}") }
                 }
         }
     }
@@ -766,22 +591,15 @@ class AdminViewModel @Inject constructor(
     fun exportLogs() {
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true) }
-
             adminRepository.exportLogs()
                 .onSuccess { filePath ->
                     _uiState.update {
-                        it.copy(
-                            isExporting = false,
-                            successMessage = "日誌已匯出至: $filePath"
-                        )
+                        it.copy(isExporting = false, successMessage = "日誌已匯出至: $filePath")
                     }
                 }
                 .onFailure { error ->
                     _uiState.update {
-                        it.copy(
-                            isExporting = false,
-                            error = "匯出失敗: ${error.message}"
-                        )
+                        it.copy(isExporting = false, error = "匯出失敗: ${error.message}")
                     }
                 }
         }
@@ -789,14 +607,11 @@ class AdminViewModel @Inject constructor(
 
     fun updateServerUrl(url: String) {
         viewModelScope.launch {
+            // 🔧 寫入 DataStore,同時告知 AdminRepository（如果它還有其他邏輯）
+            settingsDataStore.setServerUrl(url)
             adminRepository.updateServerUrl(url)
                 .onSuccess {
-                    _uiState.update {
-                        it.copy(
-                            settings = it.settings.copy(serverUrl = url),
-                            successMessage = "伺服器地址已更新"
-                        )
-                    }
+                    _uiState.update { it.copy(successMessage = "伺服器地址已更新") }
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(error = error.message) }
@@ -806,21 +621,14 @@ class AdminViewModel @Inject constructor(
 
     fun updateWebSocketUrl(url: String) {
         webSocketManager.updateWebSocketUrl(url)
-        _uiState.update {
-            it.copy(
-                settings = it.settings.copy(websocketUrl = url),
-                successMessage = "WebSocket 地址已更新"
-            )
-        }
+        // 🔧 不再手動 copy settings,由 observeSettingsChanges() 自動更新
+        _uiState.update { it.copy(successMessage = "WebSocket 地址已更新") }
     }
 
     fun toggleWebSocket(enabled: Boolean) {
         webSocketManager.setWebSocketEnabled(enabled)
         _uiState.update {
-            it.copy(
-                settings = it.settings.copy(websocketEnabled = enabled),
-                successMessage = if (enabled) "WebSocket 已啟用" else "WebSocket 已禁用"
-            )
+            it.copy(successMessage = if (enabled) "WebSocket 已啟用" else "WebSocket 已禁用")
         }
     }
 
@@ -834,14 +642,10 @@ class AdminViewModel @Inject constructor(
 
     fun updateScanTimeout(timeout: Int) {
         viewModelScope.launch {
+            settingsDataStore.setScanTimeout(timeout)    // 🔧 直接寫 DataStore
             adminRepository.updateScanTimeout(timeout)
                 .onSuccess {
-                    _uiState.update {
-                        it.copy(
-                            settings = it.settings.copy(scanTimeoutSeconds = timeout),
-                            successMessage = "掃描逾時已更新"
-                        )
-                    }
+                    _uiState.update { it.copy(successMessage = "掃描逾時已更新") }
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(error = error.message) }
@@ -851,13 +655,11 @@ class AdminViewModel @Inject constructor(
 
     fun toggleAutoSync(enabled: Boolean) {
         viewModelScope.launch {
+            settingsDataStore.setAutoSync(enabled)       // 🔧 直接寫 DataStore
             adminRepository.toggleAutoSync(enabled)
                 .onSuccess {
                     _uiState.update {
-                        it.copy(
-                            settings = it.settings.copy(autoSync = enabled),
-                            successMessage = if (enabled) "自動同步已啟用" else "自動同步已停用"
-                        )
+                        it.copy(successMessage = if (enabled) "自動同步已啟用" else "自動同步已停用")
                     }
                 }
                 .onFailure { error ->
@@ -866,45 +668,16 @@ class AdminViewModel @Inject constructor(
         }
     }
 
-    fun showClearDataDialog() {
-        _uiState.update { it.copy(showClearDataDialog = true) }
-    }
-
-    fun dismissClearDataDialog() {
-        _uiState.update { it.copy(showClearDataDialog = false) }
-    }
-
-    fun showServerUrlDialog() {
-        _uiState.update { it.copy(showServerUrlDialog = true) }
-    }
-
-    fun dismissServerUrlDialog() {
-        _uiState.update { it.copy(showServerUrlDialog = false) }
-    }
-
-    fun showWebSocketUrlDialog() {
-        _uiState.update { it.copy(showWebSocketUrlDialog = true) }
-    }
-
-    fun dismissWebSocketUrlDialog() {
-        _uiState.update { it.copy(showWebSocketUrlDialog = false) }
-    }
-
-    fun showScanTimeoutDialog() {
-        _uiState.update { it.copy(showScanTimeoutDialog = true) }
-    }
-
-    fun dismissScanTimeoutDialog() {
-        _uiState.update { it.copy(showScanTimeoutDialog = false) }
-    }
-
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
-    }
-
-    fun clearSuccess() {
-        _uiState.update { it.copy(successMessage = null) }
-    }
+    fun showClearDataDialog() { _uiState.update { it.copy(showClearDataDialog = true) } }
+    fun dismissClearDataDialog() { _uiState.update { it.copy(showClearDataDialog = false) } }
+    fun showServerUrlDialog() { _uiState.update { it.copy(showServerUrlDialog = true) } }
+    fun dismissServerUrlDialog() { _uiState.update { it.copy(showServerUrlDialog = false) } }
+    fun showWebSocketUrlDialog() { _uiState.update { it.copy(showWebSocketUrlDialog = true) } }
+    fun dismissWebSocketUrlDialog() { _uiState.update { it.copy(showWebSocketUrlDialog = false) } }
+    fun showScanTimeoutDialog() { _uiState.update { it.copy(showScanTimeoutDialog = true) } }
+    fun dismissScanTimeoutDialog() { _uiState.update { it.copy(showScanTimeoutDialog = false) } }
+    fun clearError() { _uiState.update { it.copy(error = null) } }
+    fun clearSuccess() { _uiState.update { it.copy(successMessage = null) } }
 
     override fun onCleared() {
         super.onCleared()

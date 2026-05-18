@@ -24,7 +24,7 @@ import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.presentation.navigation.NavGraph
 import com.kdl.rfidinventory.presentation.ui.screens.splash.SplashScreen
 import com.kdl.rfidinventory.presentation.ui.theme.RFIDInventoryTheme
-import com.kdl.rfidinventory.util.KeyEventHandler
+import com.kdl.rfidinventory.domain.manager.KeyEventHandler
 import com.kdl.rfidinventory.util.ScreenBrightnessManager
 import com.kdl.rfidinventory.domain.manager.barcode.BarcodeScanManager
 import com.kdl.rfidinventory.domain.manager.rfid.RFIDManager
@@ -195,19 +195,22 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun AppContent() {
         var isInitialized by remember { mutableStateOf(false) }
+        var startDestination by remember { mutableStateOf("login") }
 
         if (!isInitialized) {
-            // 顯示啟動畫面
             SplashScreen(
-                onInitComplete = {
+                onInitComplete = { isLoggedIn ->
+                    startDestination = if (isLoggedIn) "main" else "login"
                     isInitialized = true
-                    Timber.d("✅ App initialization complete")
+                    Timber.d("✅ App init complete, startDestination=$startDestination")
                 }
             )
         } else {
-            // 顯示主應用程式
             val navController = rememberNavController()
-            NavGraph(navController = navController)
+            NavGraph(
+                navController = navController,
+                startDestination = startDestination
+            )
         }
     }
 

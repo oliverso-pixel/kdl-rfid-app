@@ -50,6 +50,7 @@ dependencies {
 
     // Splash Screen API
     implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     // RFID SDK
 //    implementation(files("libs/USDKLibrary-v1.0.0909.aar"))

@@ -8,6 +8,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -22,23 +25,23 @@ class LoginViewModel @Inject constructor(
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
     init {
-        // 檢查是否已登錄
-        checkLoginStatus()
-    }
-
-    private fun checkLoginStatus() {
-        if (authRepository.isLoggedIn()) {
-            val user = authRepository.getCurrentUser()
-            if (user != null) {
-                _uiState.update {
-                    it.copy(
-                        isLoggedIn = true,
-                        currentUser = user
-                    )
-                }
-                Timber.d("✅ User already logged in: ${user.username}")
+        // 🔧 同時觀察 currentUser + isLoggedIn,確保重開 app 後能恢復登入狀態
+        combine(
+            authRepository.currentUserFlow,
+            authRepository.isLoggedInFlow
+        ) { user, isLoggedIn ->
+            user to isLoggedIn
+        }.onEach { (user, isLoggedIn) ->
+            _uiState.update {
+                it.copy(
+                    currentUser = user,
+                    isLoggedIn = isLoggedIn && user != null
+                )
             }
-        }
+            if (isLoggedIn && user != null) {
+                Timber.d("✅ Restored login state from DataStore: ${user.username}")
+            }
+        }.launchIn(viewModelScope)
     }
 
     fun updateUsername(username: String) {
@@ -57,7 +60,6 @@ class LoginViewModel @Inject constructor(
         val username = _uiState.value.username.trim()
         val password = _uiState.value.password
 
-        // 驗證輸入
         if (username.isBlank()) {
             _uiState.update { it.copy(error = "請輸入用戶名") }
             return
@@ -78,7 +80,7 @@ class LoginViewModel @Inject constructor(
                             isLoading = false,
                             isLoggedIn = true,
                             currentUser = user,
-                            password = "" // 清除密碼
+                            password = ""
                         )
                     }
                     Timber.d("✅ Login successful: ${user.username}")
@@ -101,17 +103,12 @@ class LoginViewModel @Inject constructor(
 
             authRepository.logout()
                 .onSuccess {
-                    _uiState.update {
-                        LoginUiState() // 重置所有狀態
-                    }
+                    _uiState.update { LoginUiState() }
                     Timber.d("✅ Logout successful")
                 }
                 .onFailure { error ->
                     Timber.e(error, "❌ Logout failed")
-                    // 即使 API 失敗，也清除本地數據
-                    _uiState.update {
-                        LoginUiState()
-                    }
+                    _uiState.update { LoginUiState() }
                 }
         }
     }

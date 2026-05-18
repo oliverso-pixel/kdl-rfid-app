@@ -1,14 +1,15 @@
 package com.kdl.rfidinventory.di
 
 import android.content.Context
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.kdl.rfidinventory.data.device.DeviceInfoProvider
-import com.kdl.rfidinventory.data.local.preferences.AuthPreferences
+import com.kdl.rfidinventory.data.local.datastore.AuthTokenProvider
 import com.kdl.rfidinventory.data.local.preferences.PreferencesManager
 import com.kdl.rfidinventory.data.remote.api.ApiService
 import com.kdl.rfidinventory.data.remote.api.AuthApiService
 import com.kdl.rfidinventory.data.remote.api.DeviceApi
 import com.kdl.rfidinventory.data.remote.api.LoadingApiService
-import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.DeviceRepository
 import com.kdl.rfidinventory.util.Constants
 import dagger.Module
@@ -38,25 +39,23 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(authPreferences: AuthPreferences): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        }
+    fun provideGson(): Gson = GsonBuilder()
+        .setLenient()
+        .create()
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(authTokenProvider: AuthTokenProvider): OkHttpClient {
+        val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY }
 
         return OkHttpClient.Builder()
-            .addInterceptor(loggingInterceptor)
+            .addInterceptor(logging)
             .addInterceptor { chain ->
                 val original = chain.request()
-                val authHeader = authPreferences.getAuthorizationHeader()
-
-                val request = if (authHeader != null) {
-                    original.newBuilder()
-                        .header("Authorization", authHeader)
-                        .build()
-                } else {
-                    original
-                }
-
+                val header = authTokenProvider.getAuthorizationHeader()
+                val request = if (header != null) {
+                    original.newBuilder().header("Authorization", header).build()
+                } else original
                 chain.proceed(request)
             }
             .connectTimeout(Constants.API_TIMEOUT, TimeUnit.MILLISECONDS)
@@ -67,11 +66,11 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit {
+    fun provideRetrofit(okHttpClient: OkHttpClient, gson: Gson): Retrofit {
         return Retrofit.Builder()
             .baseUrl(Constants.BASE_URL)
             .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
+            .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
     }
 
@@ -123,15 +122,5 @@ object NetworkModule {
         deviceInfoProvider: DeviceInfoProvider
     ): DeviceRepository {
         return DeviceRepository(deviceApi, deviceInfoProvider)
-    }
-
-    @Provides
-    @Singleton
-    fun provideWebSocketManager(
-        @ApplicationContext context: Context,
-        deviceRepository: DeviceRepository,
-        preferencesManager: PreferencesManager
-    ): WebSocketManager {
-        return WebSocketManager(context, deviceRepository, preferencesManager)
     }
 }

@@ -13,7 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.kdl.rfidinventory.util.NetworkState
+import com.kdl.rfidinventory.data.remote.model.NetworkState
 
 @Composable
 fun ConnectionStatusBar(

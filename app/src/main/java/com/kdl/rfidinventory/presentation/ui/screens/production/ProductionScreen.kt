@@ -21,9 +21,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.presentation.ui.components.*
-import com.kdl.rfidinventory.util.ScanMode
-import com.kdl.rfidinventory.util.ScanModeAvailability
-import com.kdl.rfidinventory.util.ScanType
+import com.kdl.rfidinventory.domain.model.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanModeAvailability
+import com.kdl.rfidinventory.domain.model.ScanType
 import com.kdl.rfidinventory.util.toDateOnly
 
 @RequiresApi(Build.VERSION_CODES.O)

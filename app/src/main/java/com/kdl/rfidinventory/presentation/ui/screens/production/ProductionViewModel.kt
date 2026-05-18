@@ -5,14 +5,20 @@ import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
+import com.kdl.rfidinventory.data.local.datastore.SettingsDataStore
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
+import com.kdl.rfidinventory.data.remote.model.NetworkState
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.ProductionRepository
+import com.kdl.rfidinventory.domain.manager.ScanManager
+import com.kdl.rfidinventory.domain.manager.ScanResult
 import com.kdl.rfidinventory.domain.manager.rfid.RFIDTag
+import com.kdl.rfidinventory.domain.model.ScanContext
+import com.kdl.rfidinventory.domain.model.ScanMode
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -32,6 +38,7 @@ class ProductionViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val productionRepository: ProductionRepository,
     private val basketRepository: BasketRepository,
+    private val settingsDataStore: SettingsDataStore,
     private val json: Json
 ) : ViewModel() {
 
@@ -55,6 +62,13 @@ class ProductionViewModel @Inject constructor(
     val scanState = scanManager.scanState
 
     private val validatingUids = mutableSetOf<String>()
+
+    val maxBasketsPerScan: StateFlow<Int> = settingsDataStore.maxBasketsPerScan
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = SettingsDataStore.DEFAULT_MAX_BASKETS
+        )
 
     init {
 //        Timber.d("ProductionViewModel initialized")
@@ -254,14 +268,24 @@ class ProductionViewModel @Inject constructor(
      *  驗證並添加籃子
      */
     private fun validateAndAddBasket(uid: String, rssi: Int) {
-        if (validatingUids.contains(uid)) {
-//            Timber.d("⏭️ Basket $uid is already being validated, skipping...")
-            return
-        }
+        if (validatingUids.contains(uid)) { return }
 
         val existingBasketIndex = _uiState.value.scannedBaskets.indexOfFirst { it.uid == uid }
         if (existingBasketIndex != -1) {
             updateExistingBasket(existingBasketIndex, uid, rssi)
+            return
+        }
+
+        val limit = maxBasketsPerScan.value
+        if (_uiState.value.scannedBaskets.size >= limit) {
+            scanManager.stopScanning()
+            _uiState.update {
+                it.copy(
+                    error = "⚠️ 已達掃描上限 $limit 個,請先提交後再繼續",
+                    showConfirmDialog = true  // 自動彈出提交確認
+                )
+            }
+            Timber.w("🛑 Scan limit reached ($limit), rejecting new basket: $uid")
             return
         }
 
@@ -273,7 +297,7 @@ class ProductionViewModel @Inject constructor(
                 .onSuccess { basket ->
                     when (basket.status) {
                         /**
-                         * TODO: Basket Status if full version update not allow shipped
+                         * TODO: Basket Status if full version update not allow shipped status
                          */
                         BasketStatus.UNASSIGNED, BasketStatus.SHIPPED -> {
                             Timber.d("✅ Basket valid for production: $uid")
@@ -292,7 +316,17 @@ class ProductionViewModel @Inject constructor(
                                         )
                                     }
                                 } else {
-                                    addNewBasket(uid, rssi, basket)
+                                    if (_uiState.value.scannedBaskets.size >= maxBasketsPerScan.value) {
+                                        scanManager.stopScanning()
+                                        _uiState.update {
+                                            it.copy(
+                                                error = "⚠️ 已達掃描上限,請先提交",
+                                                showConfirmDialog = true
+                                            )
+                                        }
+                                    } else {
+                                        addNewBasket(uid, rssi, basket)
+                                    }
                                 }
                             }
                         }
@@ -367,6 +401,10 @@ class ProductionViewModel @Inject constructor(
             lastScannedTime = System.currentTimeMillis()
         )
 
+        val updatedList = _uiState.value.scannedBaskets + newBasket
+        val newCount = updatedList.size
+        val limit = maxBasketsPerScan.value
+
         _uiState.update { state ->
             state.copy(
                 scannedBaskets = state.scannedBaskets + newBasket,
@@ -374,6 +412,18 @@ class ProductionViewModel @Inject constructor(
                 isValidating = false,
 //                successMessage = " 籃子 ${uid.takeLast(8)} 已添加"
             )
+        }
+
+        if (newCount >= limit) {
+            Timber.d("🛑 Reached scan limit ($limit), auto-stopping")
+            scanManager.stopScanning()
+            _uiState.update {
+                it.copy(
+                    showConfirmDialog = true,
+                    successMessage = "✅ 已達掃描上限 $limit 個,請確認提交"
+                )
+            }
+            return
         }
 
         if (_uiState.value.scanMode == ScanMode.SINGLE) {

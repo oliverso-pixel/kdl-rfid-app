@@ -1,6 +1,5 @@
 package com.kdl.rfidinventory.presentation.ui.theme
 
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.kdl.rfidinventory.data.model.BasketStatus
@@ -15,10 +14,10 @@ object BasketStatusColors {
         return when (status) {
             BasketStatus.UNASSIGNED -> StatusUnassignedContainer
             BasketStatus.IN_PRODUCTION -> StatusInProductionContainer
-            BasketStatus.RECEIVED -> StatusReceivedContainer
+//            BasketStatus.RECEIVED -> StatusReceivedContainer
             BasketStatus.IN_STOCK -> StatusInStockContainer
             BasketStatus.SHIPPED -> StatusShippedContainer
-            BasketStatus.SAMPLING -> StatusSamplingContainer
+//            BasketStatus.SAMPLING -> StatusSamplingContainer
             BasketStatus.DAMAGED -> StatusSamplingContainer
             else -> StatusUnassigned
         }
@@ -29,23 +28,14 @@ object BasketStatusColors {
         return when (status) {
             BasketStatus.UNASSIGNED -> OnStatusUnassigned
             BasketStatus.IN_PRODUCTION -> OnStatusInProduction
-            BasketStatus.RECEIVED -> OnStatusReceived
+//            BasketStatus.RECEIVED -> OnStatusReceived
             BasketStatus.IN_STOCK -> OnStatusInStock
             BasketStatus.SHIPPED -> OnStatusShipped
-            BasketStatus.SAMPLING -> OnStatusSampling
+//            BasketStatus.SAMPLING -> OnStatusSampling
             BasketStatus.DAMAGED -> OnStatusSampling
             else -> OnStatusUnassigned
         }
     }
-
-    @Composable
-    fun getValidStatusColor(): Color = MaterialTheme.colorScheme.surfaceVariant
-
-    @Composable
-    fun getInvalidStatusColor(): Color = MaterialTheme.colorScheme.errorContainer
-
-    @Composable
-    fun getInvalidStatusBorderColor(): Color = MaterialTheme.colorScheme.error
 }
 
 /**
@@ -54,13 +44,7 @@ object BasketStatusColors {
 object ScanModeColors {
 
     @Composable
-    fun getRFIDColor(): Color = ScanModeRFID
-
-    @Composable
     fun getRFIDContainerColor(): Color = ScanModeRFIDContainer
-
-    @Composable
-    fun getBarcodeColor(): Color = ScanModeBarcode
 
     @Composable
     fun getBarcodeContainerColor(): Color = ScanModeBarcodeContainer

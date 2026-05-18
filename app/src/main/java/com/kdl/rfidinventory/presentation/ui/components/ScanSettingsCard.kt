@@ -9,9 +9,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.kdl.rfidinventory.presentation.ui.theme.ScanModeColors
-import com.kdl.rfidinventory.util.ScanMode
-import com.kdl.rfidinventory.util.ScanModeAvailability
-import com.kdl.rfidinventory.util.ScanType
+import com.kdl.rfidinventory.domain.model.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanModeAvailability
+import com.kdl.rfidinventory.domain.model.ScanType
 
 /**
  * 統一的掃描設置卡片

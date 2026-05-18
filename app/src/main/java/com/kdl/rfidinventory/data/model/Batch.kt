@@ -34,20 +34,4 @@ data class Batch(
      */
     fun getRemainingTarget(): Int = (targetQuantity - producedQuantity).coerceAtLeast(0)
 
-    /**
-     * 是否還有剩余數量
-     */
-    fun hasRemainingQuantity(): Boolean = remainingQuantity > 0
-
-    /**
-     * 剩余百分比
-     */
-    fun remainingPercentage(): Float =
-        if (totalQuantity > 0) (remainingQuantity.toFloat() / totalQuantity * 100)
-        else 0f
-
-    /**
-     * 是否即將用完（剩余少於20%）
-     */
-    fun isLowStock(): Boolean = remainingPercentage() < 20f
 }

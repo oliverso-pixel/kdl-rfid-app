@@ -12,12 +12,17 @@ import com.kdl.rfidinventory.data.model.Product
 import com.kdl.rfidinventory.data.model.Warehouse
 import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
+import com.kdl.rfidinventory.data.remote.model.NetworkState
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.BasketValidationForInventoryResult
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
 import com.kdl.rfidinventory.data.repository.json
+import com.kdl.rfidinventory.domain.manager.ScanManager
+import com.kdl.rfidinventory.domain.manager.ScanResult
+import com.kdl.rfidinventory.domain.model.ScanContext
+import com.kdl.rfidinventory.domain.model.ScanMode
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -1041,7 +1046,7 @@ class InventoryViewModel @Inject constructor(
                 val statusDesc = when (basket.status) {
                     BasketStatus.UNASSIGNED -> "未分配"
                     BasketStatus.IN_PRODUCTION -> "生產中"
-                    BasketStatus.RECEIVED -> "已收貨"
+//                    BasketStatus.RECEIVED -> "已收貨"
                     BasketStatus.IN_STOCK -> "在庫中"
                     BasketStatus.SHIPPED -> "已發貨"
                     BasketStatus.DAMAGED -> "已損壞"

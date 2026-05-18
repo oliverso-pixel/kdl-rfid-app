@@ -20,8 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.Warehouse
+import com.kdl.rfidinventory.domain.manager.ScanState
 import com.kdl.rfidinventory.presentation.ui.components.*
-import com.kdl.rfidinventory.util.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanMode
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -241,7 +242,7 @@ private fun WarehouseSelectionContent(
 @Composable
 private fun ScanningContent(
     uiState: TransferUiState,
-    scanState: com.kdl.rfidinventory.util.ScanState,
+    scanState: ScanState,
     onScanModeChange: (ScanMode) -> Unit,
     onToggleScan: () -> Unit,
     onRemoveItem: (String) -> Unit

@@ -8,12 +8,17 @@ import com.kdl.rfidinventory.data.local.dao.PendingOperationDao
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.data.remote.dto.request.BasketUpdateItemDto
 import com.kdl.rfidinventory.data.remote.dto.request.CommonDataDto
+import com.kdl.rfidinventory.data.remote.model.NetworkState
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.repository.AuthRepository
 import com.kdl.rfidinventory.data.repository.BasketRepository
 import com.kdl.rfidinventory.data.repository.BasketValidationForInventoryResult
 import com.kdl.rfidinventory.data.repository.LoadingRepository
 import com.kdl.rfidinventory.data.repository.WarehouseRepository
+import com.kdl.rfidinventory.domain.manager.ScanManager
+import com.kdl.rfidinventory.domain.manager.ScanResult
+import com.kdl.rfidinventory.domain.model.ScanContext
+import com.kdl.rfidinventory.domain.model.ScanMode
 import com.kdl.rfidinventory.util.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay

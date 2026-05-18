@@ -26,9 +26,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.*
 import com.kdl.rfidinventory.presentation.ui.components.ConnectionStatusBar
 import com.kdl.rfidinventory.presentation.ui.components.ScanSettingsCard
-import com.kdl.rfidinventory.util.ScanMode
-import com.kdl.rfidinventory.util.ScanModeAvailability
-import com.kdl.rfidinventory.util.ScanState
+import com.kdl.rfidinventory.domain.model.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanModeAvailability
+import com.kdl.rfidinventory.domain.manager.ScanState
 import timber.log.Timber
 
 @RequiresApi(Build.VERSION_CODES.O)

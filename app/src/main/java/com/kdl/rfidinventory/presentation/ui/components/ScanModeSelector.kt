@@ -5,8 +5,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.kdl.rfidinventory.util.ScanMode
-import com.kdl.rfidinventory.util.ScanModeAvailability
+import com.kdl.rfidinventory.domain.model.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanModeAvailability
 
 @Composable
 fun ScanModeSelector(

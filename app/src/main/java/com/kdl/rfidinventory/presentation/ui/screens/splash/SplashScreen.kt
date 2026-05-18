@@ -17,23 +17,21 @@ import timber.log.Timber
 
 @Composable
 fun SplashScreen(
-    onInitComplete: () -> Unit,
+    onInitComplete: (isLoggedIn: Boolean) -> Unit,   // 🔧 加入 isLoggedIn 參數
     modifier: Modifier = Modifier,
     viewModel: SplashViewModel = hiltViewModel()
 ) {
     val initState by viewModel.initState.collectAsState()
 
-    // 啟動初始化（僅執行一次）
     LaunchedEffect(Unit) {
         Timber.d("🚀 SplashScreen composed, starting initialization")
         viewModel.startInitialization()
     }
 
-    // 監聽初始化完成
     LaunchedEffect(initState.isComplete) {
         if (initState.isComplete) {
-            Timber.d("🎉 Initialization complete, calling onInitComplete")
-            onInitComplete()
+            Timber.d("🎉 Initialization complete, loggedIn=${initState.isLoggedIn}")
+            onInitComplete(initState.isLoggedIn)   // 🔧 傳遞登入狀態
         }
     }
 
@@ -50,12 +48,10 @@ fun SplashScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Logo 區域（帶動畫）
             LogoSection()
 
             Spacer(modifier = Modifier.height(64.dp))
 
-            // 錯誤訊息
             if (initState.error != null) {
                 Card(
                     modifier = Modifier
@@ -86,7 +82,6 @@ fun SplashScreen(
                 }
             }
 
-            // 進度條
             LinearProgressIndicator(
                 progress = { initState.progress },
                 modifier = Modifier
@@ -98,7 +93,6 @@ fun SplashScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // 載入訊息
             Text(
                 text = initState.message,
                 style = MaterialTheme.typography.bodyLarge,
@@ -108,7 +102,6 @@ fun SplashScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 百分比
             Text(
                 text = "${(initState.progress * 100).toInt()}%",
                 style = MaterialTheme.typography.titleMedium.copy(
@@ -118,7 +111,6 @@ fun SplashScreen(
             )
         }
 
-        // 版本資訊（底部）
         Text(
             text = "RFID 庫存系統 v1.0.0",
             style = MaterialTheme.typography.bodySmall,
@@ -132,7 +124,6 @@ fun SplashScreen(
 
 @Composable
 private fun LogoSection() {
-    // Logo 脈動動畫
     val infiniteTransition = rememberInfiniteTransition(label = "logo_pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 0.95f,
@@ -148,7 +139,6 @@ private fun LogoSection() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Logo 容器（帶動畫）
         Surface(
             modifier = Modifier
                 .size(120.dp)
@@ -157,9 +147,7 @@ private fun LogoSection() {
             color = MaterialTheme.colorScheme.primaryContainer,
             shadowElevation = 8.dp
         ) {
-            Box(
-                contentAlignment = Alignment.Center
-            ) {
+            Box(contentAlignment = Alignment.Center) {
                 Icon(
                     painter = painterResource(id = android.R.drawable.ic_menu_view),
                     contentDescription = "Logo",
@@ -169,7 +157,6 @@ private fun LogoSection() {
             }
         }
 
-        // App 名稱
         Text(
             text = "RFID 庫存系統",
             style = MaterialTheme.typography.headlineMedium.copy(
@@ -178,7 +165,6 @@ private fun LogoSection() {
             color = MaterialTheme.colorScheme.onBackground
         )
 
-        // 副標題
         Text(
             text = "智能倉儲管理解決方案",
             style = MaterialTheme.typography.bodyMedium,

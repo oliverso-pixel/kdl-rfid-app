@@ -21,13 +21,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Batch
 import com.kdl.rfidinventory.data.model.Product
 import com.kdl.rfidinventory.data.model.Warehouse
 import com.kdl.rfidinventory.presentation.ui.components.*
 import com.kdl.rfidinventory.util.Constants
-import com.kdl.rfidinventory.util.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanMode
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -1201,7 +1200,7 @@ private fun ScanningStep(
     statistics: InventoryStatistics,
     scanMode: ScanMode,
     isScanning: Boolean,
-    scanType: com.kdl.rfidinventory.util.ScanType,
+    scanType: com.kdl.rfidinventory.domain.model.ScanType,
     isValidating: Boolean,
     onModeChange: (ScanMode) -> Unit,
     onToggleScan: () -> Unit,

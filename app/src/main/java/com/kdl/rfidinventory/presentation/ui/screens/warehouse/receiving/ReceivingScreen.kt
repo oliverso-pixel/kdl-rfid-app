@@ -21,8 +21,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kdl.rfidinventory.data.model.BasketStatus
 import com.kdl.rfidinventory.data.model.Warehouse
+import com.kdl.rfidinventory.domain.manager.ScanState
 import com.kdl.rfidinventory.presentation.ui.components.*
-import com.kdl.rfidinventory.util.ScanMode
+import com.kdl.rfidinventory.domain.model.ScanMode
 import timber.log.Timber
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -436,7 +437,7 @@ private fun WarehouseSelectionStep(
 @Composable
 private fun ScanningStep(
     uiState: ReceivingUiState,
-    scanState: com.kdl.rfidinventory.util.ScanState,
+    scanState: ScanState,
     onScanModeChange: (ScanMode) -> Unit,
     onToggleScan: () -> Unit,
     onClearBaskets: () -> Unit,

@@ -13,16 +13,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 籃子驗證結果（用於收貨）
- */
-//sealed class BasketValidationForReceivingResult {
-//    data class Valid(val basket: Basket) : BasketValidationForReceivingResult()
-//    data class NotRegistered(val uid: String) : BasketValidationForReceivingResult()
-//    data class InvalidStatus(val basket: Basket, val currentStatus: BasketStatus) : BasketValidationForReceivingResult()
-//    data class Error(val message: String) : BasketValidationForReceivingResult()
-//}
-
-/**
  * 籃子驗證結果（用於盤點）
  */
 sealed class BasketValidationForInventoryResult {
@@ -108,49 +98,6 @@ class WarehouseRepository @Inject constructor(
         }
     }
 
-    /**
-     * 獲取指定倉庫的所有籃子（按產品分類）
-     */
-//    suspend fun getWarehouseBasketsByWarehouse(warehouseId: String): Result<List<Basket>> =
-//        withContext(Dispatchers.IO) {
-//            try {
-//                val allBaskets = basketDao.getAllBaskets().first()
-//
-//                // 調試：打印所有籃子的狀態
-//                Timber.d("📦 ========== Warehouse Baskets Debug ==========")
-//                Timber.d("Total baskets in DB: ${allBaskets.size}")
-//
-//                allBaskets.forEach { entity ->
-//                    Timber.d("Basket ${entity.uid.takeLast(8)}: warehouse=${entity.warehouseId}, status=${entity.status}")
-//                }
-//
-//                val warehouseBaskets = allBaskets
-//                    .filter { entity ->
-//                        // 修改過濾條件：只檢查 warehouseId
-//                        val matchWarehouse = entity.warehouseId == warehouseId
-//                        val isValidStatus = entity.status == BasketStatus.RECEIVED ||
-//                                entity.status == BasketStatus.IN_STOCK
-//
-//                        Timber.d("Basket ${entity.uid.takeLast(8)}: matchWarehouse=$matchWarehouse, isValidStatus=$isValidStatus")
-//
-//                        // 臨時調試：先只檢查 warehouse，忽略狀態
-//                        matchWarehouse
-//                    }
-//                    .map { it.toBasket() }
-//
-//                Timber.d("📦 Found ${warehouseBaskets.size} baskets in warehouse $warehouseId")
-//
-//                // 打印每個籃子的詳細信息
-//                warehouseBaskets.forEach { basket ->
-//                    Timber.d("  - ${basket.uid.takeLast(8)}: ${basket.product?.name}, status=${basket.status}, qty=${basket.quantity}")
-//                }
-//
-//                Result.success(warehouseBaskets)
-//            } catch (e: Exception) {
-//                Timber.e(e, "Failed to get warehouse baskets")
-//                Result.failure(e)
-//            }
-//        }
     suspend fun getWarehouseBasketsByWarehouse(warehouseId: String): Result<List<Basket>> =
         withContext(Dispatchers.IO) {
             try {
@@ -230,124 +177,6 @@ class WarehouseRepository @Inject constructor(
         } catch (e: Exception) {
             Timber.e(e, "Failed to fetch batches")
             Result.failure(e)
-        }
-    }
-
-    /**
-     * 更新籃子信息（用於盤點額外項）
-     */
-    suspend fun updateBasketInfo(
-        uid: String,
-        productId: String,
-        warehouseId: String,
-        quantity: Int,
-        isOnline: Boolean
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            Timber.d("📦 Updating basket info: $uid -> Product: $productId, Warehouse: $warehouseId, Qty: $quantity")
-
-            if (isOnline) {
-                // 在線模式：提交到 API
-                Timber.d("🌐 Online: Submitting to API")
-
-                // TODO: 真實 API 調用
-                // val request = UpdateBasketRequest(
-                //     uid = uid,
-                //     productId = productId,
-                //     warehouseId = warehouseId,
-                //     quantity = quantity,
-                //     status = BasketStatus.IN_STOCK
-                // )
-                // val response = apiService.updateBasket(request)
-                // if (!response.success) {
-                //     return@withContext Result.failure(Exception(response.message ?: "更新失敗"))
-                // }
-
-                // 模擬 API 成功
-                delay(500)
-
-                // 更新本地數據庫
-//                updateBasketLocally(uid, productId, warehouseId, quantity)
-
-                Timber.d("✅ Basket updated successfully (online mode)")
-                Result.success(Unit)
-            } else {
-                // 離線模式：保存待同步 + 更新本地
-                Timber.d("📱 Offline: Saving to pending operations")
-
-                // TODO: 保存待同步操作
-                // val operation = PendingOperationEntity(
-                //     operationType = OperationType.UPDATE_BASKET,
-                //     uid = uid,
-                //     payload = Json.encodeToString(
-                //         UpdateBasketRequest(
-                //             uid = uid,
-                //             productId = productId,
-                //             warehouseId = warehouseId,
-                //             quantity = quantity,
-                //             status = BasketStatus.IN_STOCK
-                //         )
-                //     ),
-                //     timestamp = System.currentTimeMillis()
-                // )
-                // pendingOperationDao.insertOperation(operation)
-
-                // 更新本地數據庫
-//                updateBasketLocally(uid, productId, warehouseId, quantity)
-
-                Timber.d("✅ Basket updated successfully (offline mode)")
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to update basket")
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * 本地更新籃子信息
-     */
-    private suspend fun updateBasketLocally(
-        uid: String,
-        productId: String,
-        warehouseId: String,
-        quantity: Int
-    ) {
-        val entity = basketDao.getBasketByUid(uid)
-
-        if (entity != null) {
-            // 獲取產品信息（從 mock 數據）
-//            val product = mockProductionOrders().find { it.productId == productId }
-
-//            val productJson = product?.let {
-//                Json.encodeToString(
-//                    Product(
-//                        itemcode = it.productId,
-//                        barcodeId = it.barcodeId,
-//                        qrcodeId = it.qrcodeId,
-//                        name = it.productName,
-//                        btype = 1,
-//                        maxBasketCapacity = it.maxBasketCapacity,
-//                        imageUrl = it.imageUrl
-//                    )
-//                )
-//            }
-//
-//            val updatedEntity = entity.copy(
-//                productId = productId,
-//                productName = product?.productName,
-//                productJson = productJson,
-//                warehouseId = warehouseId,
-//                quantity = quantity,
-//                status = BasketStatus.IN_STOCK,
-//                lastUpdated = System.currentTimeMillis()
-//            )
-
-//            basketDao.updateBasket(updatedEntity)
-
-            Timber.d("💾 Basket updated locally: $uid -> Product: $productId, Qty: $quantity")
-        } else {
-            Timber.w("⚠️ Basket not found in local DB: $uid")
         }
     }
 

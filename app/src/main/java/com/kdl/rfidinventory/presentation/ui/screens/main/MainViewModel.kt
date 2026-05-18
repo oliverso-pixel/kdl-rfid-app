@@ -7,7 +7,7 @@ import com.kdl.rfidinventory.data.model.User
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketManager
 import com.kdl.rfidinventory.data.remote.websocket.WebSocketState
 import com.kdl.rfidinventory.data.repository.AuthRepository
-import com.kdl.rfidinventory.util.NetworkState
+import com.kdl.rfidinventory.data.remote.model.NetworkState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -21,16 +21,10 @@ class MainViewModel @Inject constructor(
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
-    // WebSocket 連接狀態
     val webSocketState: StateFlow<WebSocketState> = webSocketManager.connectionState
-
-    // WebSocket 是否啟用
     val webSocketEnabled: StateFlow<Boolean> = webSocketManager.enableWebSocket
-
-    // 是否在線（WebSocket 啟用且已連接）
     val isOnline: StateFlow<Boolean> = webSocketManager.isOnline
 
-    // 待同步操作數量
     val pendingOperationsCount: StateFlow<Int> = pendingOperationDao.getPendingCount()
         .stateIn(
             scope = viewModelScope,
@@ -38,7 +32,6 @@ class MainViewModel @Inject constructor(
             initialValue = 0
         )
 
-    // 網絡狀態（綜合 isOnline 和 pendingCount）
     val networkState: StateFlow<NetworkState> = combine(
         isOnline,
         pendingOperationsCount
@@ -54,15 +47,19 @@ class MainViewModel @Inject constructor(
         initialValue = NetworkState.Disconnected(0)
     )
 
-    private val _currentUser = MutableStateFlow<User?>(null)
-    val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
+    // 🔧 改：直接訂閱 AuthRepository 的 Flow
+    val currentUser: StateFlow<User?> = authRepository.currentUserFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
 
     private val _showLogoutDialog = MutableStateFlow(false)
     val showLogoutDialog: StateFlow<Boolean> = _showLogoutDialog.asStateFlow()
 
     init {
         Timber.d("📱 MainViewModel initialized")
-        loadCurrentUser()
         observeWebSocketState()
     }
 
@@ -109,7 +106,6 @@ class MainViewModel @Inject constructor(
             Timber.w("⚠️ WebSocket is disabled, cannot reconnect")
             return
         }
-
         viewModelScope.launch {
             try {
                 Timber.d("🔄 Reconnecting WebSocket...")
@@ -122,22 +118,14 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    // 加載當前用戶
-    private fun loadCurrentUser() {
-        _currentUser.value = authRepository.getCurrentUser()
-    }
-
-    // 顯示登出對話框
     fun showLogoutDialog() {
         _showLogoutDialog.value = true
     }
 
-    // 關閉登出對話框
     fun dismissLogoutDialog() {
         _showLogoutDialog.value = false
     }
 
-    // 登出
     fun logout() {
         viewModelScope.launch {
             authRepository.logout()
@@ -147,7 +135,6 @@ class MainViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        // 不要在這裡斷開 WebSocket，因為它是 Singleton
         Timber.d("🧹 MainViewModel cleared")
     }
 }
